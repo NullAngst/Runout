@@ -1,0 +1,60 @@
+name: Build AppImage
+
+# A pushed tag like v0.1.0 builds the AppImage and attaches it to a GitHub
+# Release. Running it by hand from the Actions tab builds the AppImage as a
+# downloadable artifact without making a release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    # The oldest Ubuntu runner GitHub still offers, since the AppImage only runs
+    # on systems with a glibc at least as new as the build machine's.
+    # ubuntu-22.04 is in deprecated support until 17 April 2027; after that,
+    # change this to ubuntu-24.04.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libasound2-dev librsvg2-dev patchelf libayatana-appindicator3-dev file
+
+      - name: Install the latest stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the current Node LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Engine tests (DSP against the reference clips in tests/)
+        run: cargo test --release -p runout-engine
+
+      - name: Install npm packages
+        run: npm install
+
+      - name: Build the AppImage
+        run: npm run tauri build -- --bundles appimage
+
+      - name: Smoke test (full chain on a generated signal)
+        run: cargo run --release -p runout -- --self-test
+
+      - name: Upload the AppImage as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Runout-AppImage
+          path: target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      - name: Attach to the release for this tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/bundle/appimage/*.AppImage
