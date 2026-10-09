@@ -1,0 +1,14 @@
+[package]
+name = "runout"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+description = "Headless Runout: batch restoration and the CI self-test"
+
+[[bin]]
+name = "runout"
+path = "src/main.rs"
+
+[dependencies]
+runout-engine = { path = "../engine" }
+rayon = "1"
