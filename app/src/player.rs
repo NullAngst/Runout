@@ -149,9 +149,17 @@ struct Feeder {
     meter_rate: u32,
     timeline_end: f64,
     ended: bool,
+    /// The last block scheduled ended exactly at the loop end, so the next one
+    /// starts back at the loop start. Only playback that runs into the loop end
+    /// wraps; a playhead placed past the loop plays straight on.
+    wrap: bool,
 }
 
+/// How far ahead of the device we keep audio requested, in playback seconds.
 const AHEAD_S: f64 = 3.0;
+/// Hard cap on items scheduled per pass, so a bad loop range can never spin
+/// the feeder thread.
+const MAX_SCHEDULE_PER_PASS: usize = 512;
 
 impl Feeder {
     fn new(sh: Arc<Shared>, rx: Receiver<Cmd>) -> Self {
@@ -177,6 +185,7 @@ impl Feeder {
             meter_rate: 0,
             timeline_end: 0.0,
             ended: false,
+            wrap: false,
         }
     }
 
@@ -249,6 +258,7 @@ impl Feeder {
             }
             Cmd::Loop(l) => {
                 self.loop_range = l.filter(|(a, b)| b - a > 0.05);
+                self.wrap = false;
             }
         }
     }
@@ -288,6 +298,7 @@ impl Feeder {
         self.next_global = t;
         self.first = true;
         self.ended = false;
+        self.wrap = false;
         self.sh.grace.store(true, Ordering::Relaxed);
         self.sh.set_pos(t);
     }
@@ -297,18 +308,41 @@ impl Feeder {
         ctx.layout.iter().enumerate().find(|(_, p)| t >= p.start - 1e-9 && t < p.start + p.duration)
     }
 
-    /// Queue blocks so about AHEAD_S seconds are requested ahead of the playhead.
+    /// Seconds of audio queued ahead of what the device has played: what sits
+    /// in the ring plus every block and silence still waiting in the queue.
+    ///
+    /// This is measured in playback time, not timeline position. A loop wraps
+    /// the timeline position back to the loop start, so comparing timeline
+    /// positions against the playhead never catches up once the playhead is
+    /// within AHEAD_S of the loop end, or past it. That was the lockup.
+    fn queued_s(&self) -> f64 {
+        let out_rate = self.stream.as_ref().map(|s| s.rate).unwrap_or(48000) as f64;
+        let mut s = self.sh.ring.len() as f64 / out_rate;
+        for (i, it) in self.queue.iter().enumerate() {
+            let done = if i == 0 { self.offset } else { 0 };
+            s += match it {
+                Item::Block { key, rate, .. } => key.len.saturating_sub(done) as f64 / *rate as f64,
+                Item::Silence { frames, rate, .. } => frames.saturating_sub(done) as f64 / *rate as f64,
+            };
+        }
+        s
+    }
+
+    /// Queue blocks so about AHEAD_S seconds of playback are requested ahead
+    /// of the device.
     fn schedule(&mut self) {
         let Some(ctx) = self.ctx.clone() else { return };
         if ctx.layout.is_empty() {
             self.ended = true;
             return;
         }
-        let pos = self.sh.pos();
-        while self.next_global < pos + AHEAD_S && !self.ended {
+        let mut budget = MAX_SCHEDULE_PER_PASS;
+        while !self.ended && budget > 0 && self.queued_s() < AHEAD_S {
+            budget -= 1;
             let mut g = self.next_global;
-            if let Some((a, b)) = self.loop_range {
-                if g >= b - 1e-6 {
+            if self.wrap {
+                self.wrap = false;
+                if let Some((a, _)) = self.loop_range {
                     g = a;
                 }
             }
@@ -324,15 +358,18 @@ impl Feeder {
                     let want = if self.first { rate as usize / 4 } else { rate as usize };
                     self.first = false;
                     let mut len = want.min((seg_frames - start).max(0) as usize);
-                    if let Some((_, b)) = self.loop_range {
-                        if g < b {
-                            let to_b = ((b - g) * rate as f64).ceil() as usize;
-                            len = len.min(to_b.max(1));
-                        }
-                    }
                     if len == 0 {
                         self.next_global = p.start + p.duration + 1e-6;
                         continue;
+                    }
+                    if let Some((_, b)) = self.loop_range {
+                        if g < b {
+                            let to_b = ((b - g) * rate as f64).ceil().max(1.0) as usize;
+                            if to_b <= len {
+                                len = to_b;
+                                self.wrap = true;
+                            }
+                        }
                     }
                     let key = Key { gen: ctx.gen, seg, start, len };
                     self.request(&ctx, key, p.source_id);
@@ -346,7 +383,11 @@ impl Feeder {
                     let mut frames = ((next - g) * rate as f64).ceil().max(1.0) as usize;
                     if let Some((_, b)) = self.loop_range {
                         if g < b {
-                            frames = frames.min(((b - g) * rate as f64).ceil().max(1.0) as usize);
+                            let to_b = ((b - g) * rate as f64).ceil().max(1.0) as usize;
+                            if to_b <= frames {
+                                frames = to_b;
+                                self.wrap = true;
+                            }
                         }
                     }
                     self.queue.push_back(Item::Silence { frames, global: g, rate });
@@ -644,4 +685,88 @@ fn open_output(rate: u32, sh: Arc<Shared>) -> Result<OutStream, String> {
     }
     .map_err(|e| e.to_string())?;
     Ok(OutStream { stream, rate })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A feeder with one 10-minute 48 kHz source on the timeline and no audio
+    /// device. Blocks are requested but never rendered (no audio in the
+    /// context), which is all the scheduler needs.
+    fn feeder() -> Feeder {
+        let sh = Arc::new(Shared {
+            playing: AtomicBool::new(false),
+            pos_bits: AtomicU64::new(0f64.to_bits()),
+            monitor: AtomicU8::new(0),
+            warn: Mutex::new(None),
+            peak: [AtomicU32::new(0), AtomicU32::new(0)],
+            meters: Mutex::new(Meters::default()),
+            underrun: AtomicBool::new(false),
+            grace: AtomicBool::new(false),
+            consumed: AtomicU64::new(0),
+            ring: Ring::new(48000 / 2),
+        });
+        let (_tx, rx) = channel();
+        let mut f = Feeder::new(sh, rx);
+        f.handle(Cmd::Update(Arc::new(RenderCtx {
+            project: Project::default(),
+            audio: HashMap::new(),
+            layout: vec![Placement { source_id: 1, start: 0.0, duration: 600.0, ratio: 1.0, rate: 48000 }],
+            gen: 1,
+        })));
+        f
+    }
+
+    fn globals(f: &Feeder) -> Vec<f64> {
+        f.queue
+            .iter()
+            .map(|it| match it {
+                Item::Block { global, .. } | Item::Silence { global, .. } => *global,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn seek_past_loop_end_plays_on_and_returns() {
+        let mut f = feeder();
+        f.handle(Cmd::Loop(Some((100.0, 120.0))));
+        f.restart(150.0);
+        f.schedule();
+        let g = globals(&f);
+        assert!(!g.is_empty());
+        assert!(g.iter().all(|&t| t >= 150.0), "jumped back into the loop: {g:?}");
+        assert!(f.queued_s() >= AHEAD_S && f.queued_s() < AHEAD_S + 1.5);
+    }
+
+    #[test]
+    fn near_loop_end_wraps_and_returns() {
+        let mut f = feeder();
+        f.handle(Cmd::Loop(Some((100.0, 120.0))));
+        f.restart(118.5);
+        f.schedule();
+        let g = globals(&f);
+        assert!(g.iter().any(|&t| (t - 100.0).abs() < 1e-9), "never wrapped: {g:?}");
+        assert!(f.queued_s() < AHEAD_S + 1.5);
+    }
+
+    #[test]
+    fn seek_before_loop_runs_into_it() {
+        let mut f = feeder();
+        f.handle(Cmd::Loop(Some((100.0, 120.0))));
+        f.restart(98.0);
+        f.schedule();
+        let g = globals(&f);
+        assert!(g.windows(2).all(|w| w[1] > w[0]), "should not wrap yet: {g:?}");
+    }
+
+    #[test]
+    fn tiny_loop_terminates() {
+        let mut f = feeder();
+        f.handle(Cmd::Loop(Some((10.0, 10.06))));
+        f.restart(10.0);
+        f.schedule();
+        assert!(f.queue.len() <= MAX_SCHEDULE_PER_PASS);
+        assert!(f.queued_s() >= AHEAD_S);
+    }
 }

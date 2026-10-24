@@ -252,6 +252,9 @@
     if (d.kind === 'select' && !d.moved) {
       const t = tAt(localX(e));
       ui.selection = null;
+      // The selection is gone, so the loop it defined goes too. Loop stays
+      // armed and picks up the next selection.
+      if (ui.loop) api.setLoop(null);
       ui.tick.pos = t;
       api.seek(t);
       const tv = trackAt(t);
