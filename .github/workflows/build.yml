@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: lts/*
 
-      - name: Engine tests (DSP against the reference clips in tests/)
+      - name: Engine tests (DSP against the reference clips, the vinyl goldens, the media checks)
         run: cargo test --release -p runout-engine
 
       - name: Install npm packages
@@ -43,7 +43,10 @@ jobs:
       - name: Build the AppImage
         run: npm run tauri build -- --bundles appimage
 
-      - name: Smoke test (full chain on a generated signal)
+      - name: App tests (the playback loop scheduler, the IEC958 status parser)
+        run: cargo test --release -p runout-app
+
+      - name: Smoke test (vinyl, tape and digital chains on generated signals)
         run: cargo run --release -p runout -- --self-test
 
       - name: Upload the AppImage as a build artifact
