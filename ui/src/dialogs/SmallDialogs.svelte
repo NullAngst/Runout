@@ -26,12 +26,12 @@
     ['Space', 'Play / pause'], ['Shift+Space', 'Stop recording'], ['Click', 'Seek'], ['Drag', 'Select (on the spectrogram: paint a band)'],
     ['Ctrl+Wheel', 'Zoom'], ['Wheel', 'Scroll'], ['+ / -', 'Zoom in / out'], ['0', 'Fit the whole timeline'],
     ['Left / Right', 'Back / forward 5 s (Shift: 1 s)'], ['Home / End', 'Start / end'], ['Up / Down', 'Previous / next track'],
-    ['[ / ]', 'Previous / next click'], ['A', 'A/B: original vs processed'], ['R', 'Listen to removed'], ['L', 'Loop the selection'],
+    ['[ / ]', 'Previous / next event: click, dropout, error, program change'], ['A', 'A/B: original vs processed'], ['R', 'Listen to removed'], ['L', 'Loop the selection'],
     ['M', 'Mark track end'], ['T', 'Track from selection'], ['J', 'Merge with next'], ['Delete', 'Delete track'],
     ['X', 'Repair selection'], ['C', 'Capture level check'], ['Ctrl+R', 'Record a side'], ['Ctrl+Enter', 'Analyze'],
     ['1 to 5', 'Steps'], ['W', 'Waveform / spectrogram / both'], ['Ctrl+Z', 'Undo'], ['Ctrl+Shift+Z', 'Redo'], ['Ctrl+S', 'Save'],
     ['Ctrl+N', 'New project'], ['Ctrl+O', 'Open project'], ['Ctrl+I', 'Import files'], ['Ctrl+Shift+I', 'Import folder'],
-    ['Ctrl+L', 'Look up tracklist'], ['Ctrl+E', 'Export'], ['Ctrl+B', 'Batch mode'], ['Esc', 'Clear selection / close'], ['?', 'This sheet'],
+    ['Ctrl+L', 'Look up tracklist'], ['Ctrl+M', 'Medium'], ['Ctrl+,', 'Settings'], ['Ctrl+E', 'Export'], ['Ctrl+B', 'Batch mode'], ['Esc', 'Clear selection / close'], ['?', 'This sheet'],
   ];
 </script>
 
@@ -41,7 +41,7 @@
       <header><h2 class="grow">Export finished</h2></header>
       <div class="body col">
         <p class="mono small selectable">{ui.lastExport.album_dir}</p>
-        {#each ui.lastExport.warnings as w}<p class="copper small">{w}</p>{/each}
+        {#each ui.lastExport.warnings as w}<p class="attention small">{w}</p>{/each}
         <pre class="mono small report selectable">{report}</pre>
       </div>
       <footer>
@@ -57,7 +57,7 @@
       <div class="body col">
         <!-- svelte-ignore a11y_autofocus -->
         <input type="text" placeholder="Name, e.g. Scratchy 60s mono-era stereo" bind:value={presetName} autofocus />
-        <p class="muted small">Saved to ~/.config/runout/presets. Hum and declip settings are kept per record when a preset is applied.</p>
+        <p class="muted small">Saved to ~/.config/runout/presets, for this medium's family. Hum, declip and measured settings are kept per recording when a preset is applied.</p>
       </div>
       <footer><button onclick={() => (ui.dialog = null)}>Cancel</button><button class="primary" disabled={!presetName.trim()} onclick={savePreset}>Save</button></footer>
     </div>
@@ -78,5 +78,5 @@
   .narrow { width: min(460px, 92vw); }
   .report { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin: 0; max-height: 52vh; overflow: auto; }
   .keys { display: grid; grid-template-columns: 140px 1fr 140px 1fr; gap: 5px 12px; }
-  .k { color: var(--verdigris); }
+  .k { color: var(--accent); }
 </style>

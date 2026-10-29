@@ -20,12 +20,37 @@ pub fn projects_root() -> PathBuf {
     home().join("Music/Runout/Projects")
 }
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Prefs {
     pub input_device: Option<String>,
     pub recent: Vec<String>,
     pub auto_stop_s: Option<f32>,
+    /// verdigris (the default), light, dark, kawaii-light, kawaii-dark.
+    pub theme: String,
+    /// Deck profile picked for each medium family.
+    pub deck_by_family: std::collections::BTreeMap<String, String>,
+    /// The medium the last new project used, preselected on the next one.
+    pub last_medium: Option<String>,
+    /// Export root for new projects; None is ~/Music/Runout.
+    pub library_root: Option<String>,
+    /// Remembered S/PDIF input, apart from the analog one.
+    pub digital_device: Option<String>,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Prefs {
+            input_device: None,
+            recent: Vec::new(),
+            auto_stop_s: None,
+            theme: "verdigris".into(),
+            deck_by_family: Default::default(),
+            last_medium: None,
+            library_root: None,
+            digital_device: None,
+        }
+    }
 }
 
 impl Prefs {

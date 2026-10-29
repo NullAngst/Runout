@@ -85,10 +85,10 @@
             onclick={(e) => { e.stopPropagation(); run(() => api.setCleaned(row.t.id, false)); }}>Raw</button>
           <button class="ghost small" class:on={row.t.cleaned} title="Cleaned: no raw copy, no restoration, no leveling. Exports bit for bit with new tags"
             onclick={(e) => { e.stopPropagation(); run(() => api.setCleaned(row.t.id, true)); }}>Cleaned</button>
-          {#if row.t.chain && !row.t.cleaned}<span class="tag verdigris">own settings</span>{/if}
+          {#if row.t.chain && !row.t.cleaned}<span class="tag accent">own settings</span>{/if}
         </div>
       {:else if row.t.chain}
-        <div class="sub row"><span class="tag verdigris">own settings</span></div>
+        <div class="sub row"><span class="tag accent">own settings</span></div>
       {/if}
     {/each}
   {/each}
@@ -103,7 +103,7 @@
   .side h3 { font-size: 13px; }
   .trk { padding: 4px 8px; border-radius: 5px; cursor: pointer; gap: 7px; }
   .trk:hover { background: var(--raised); }
-  .trk.sel { background: var(--raised); box-shadow: inset 2px 0 0 var(--verdigris); }
+  .trk.sel { background: var(--raised); box-shadow: inset 2px 0 0 var(--accent); }
   .n { width: 18px; text-align: right; color: var(--muted); }
   .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .len { width: 34px; text-align: right; }

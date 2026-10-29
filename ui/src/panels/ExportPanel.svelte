@@ -6,6 +6,18 @@
   import { openExport } from '../lib/actions';
 
   const p = $derived(ui.view?.project);
+  const kinds: [string, string, string][] = [
+    ['album', 'Album', 'A commercial release: Artist / Album Artist - Album / 01. Title.flac'],
+    ['mixtape', 'Mixtape', 'Compilations, radio rips, mixes: Mixtapes / Title / 01. Artist - Title.flac, album artist Various Artists'],
+    ['recording', 'Recording', 'Dictation, family tapes, airchecks, lectures: Recordings / Date Title / 01. Title.flac, untitled parts named Part 1, Part 2'],
+  ];
+  const fields = $derived(
+    p?.export.kind === 'album'
+      ? [['artist', 'Artist'], ['album', 'Album'], ['album_artist', 'Album artist'], ['year', 'Year'], ['genre', 'Genre']]
+      : p?.export.kind === 'mixtape'
+        ? [['album', 'Tape title'], ['year', 'Year'], ['genre', 'Genre']]
+        : [['album', 'Title'], ['artist', 'Who'], ['year', 'Date'], ['genre', 'Genre']],
+  );
 
   async function pickCover() {
     const f = await open({ filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png'] }] });
@@ -21,6 +33,14 @@
 <div class="col gap">
   <h2>Export</h2>
   <p class="muted small">Every export writes the cleaned tracks as tagged FLAC and the untouched raw capture of each side as WAV. Each export renders from the original audio through the full chain.</p>
+  {#if p.chain.digital}<p class="muted small">Digital source: with every stage off, the FLAC is bit-identical to what came off the S/PDIF input.</p>{/if}
+
+  <div class="row" title="Decides the folder layout and the tags">
+    <span class="muted">Kind</span>
+    {#each kinds as [k, lab, tip]}
+      <button class:on={p.export.kind === k} title={tip} onclick={() => edit('Project kind', (p) => (p.export.kind = k as any))}>{lab}</button>
+    {/each}
+  </div>
 
   <div class="row">
     <span class="muted">FLAC</span>
@@ -35,11 +55,12 @@
       <button class="ghost" onclick={pickRoot}>Browse</button>
     </div>
   </label>
-  <p class="small muted">Album goes to <span class="mono selectable">{ui.view.export_dir}</span></p>
+  <p class="small muted">{p.export.kind === 'album' ? 'Album' : p.export.kind === 'mixtape' ? 'Mixtape' : 'Recording'} goes to <span class="mono selectable">{ui.view.export_dir}</span></p>
+  {#if p.medium.preset.media_tag}<p class="small muted">Tagged MEDIA={p.medium.preset.media_tag}.</p>{/if}
 
   <div class="sep"></div>
-  <h3>Record</h3>
-  {#each [['artist', 'Artist'], ['album', 'Album'], ['album_artist', 'Album artist'], ['year', 'Year'], ['genre', 'Genre']] as [k, lab]}
+  <h3>{p.export.kind === 'album' ? 'Record' : p.export.kind === 'mixtape' ? 'Mixtape' : 'Recording'}</h3>
+  {#each fields as [k, lab]}
     <label class="row field"><span class="lab">{lab}</span>
       <input type="text" class="grow" value={(p.album as any)[k]} onkeydown={(e) => e.stopPropagation()}
         onchange={(e) => { const v = (e.target as HTMLInputElement).value; edit('Album info', (p) => ((p.album as any)[k] = v)); }} /></label>

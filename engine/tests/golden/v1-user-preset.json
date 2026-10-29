@@ -1,0 +1,66 @@
+{
+  "id": "my-crackly-lps",
+  "name": "My crackly LPs",
+  "builtin": false,
+  "chain": {
+    "rumble": {
+      "enabled": true,
+      "freq_hz": 20.0,
+      "slope_db_oct": 24,
+      "linear_phase": false
+    },
+    "hum": {
+      "enabled": false,
+      "mains_hz": 60.0,
+      "harmonics": 4,
+      "width_hz": 1.0
+    },
+    "declick": {
+      "enabled": true,
+      "threshold_db": 12.0,
+      "max_len_ms": 2.0
+    },
+    "decrackle": {
+      "enabled": true,
+      "threshold_db": 10.5,
+      "max_len_ms": 0.25
+    },
+    "declip": {
+      "enabled": false,
+      "level_db": -0.1,
+      "max_len_ms": 2.0
+    },
+    "denoise": {
+      "enabled": true,
+      "reduction_db": 7.5,
+      "smoothing_pct": 50.0
+    },
+    "channel": {
+      "enabled": false,
+      "balance_db": 0.0,
+      "swap": false,
+      "azimuth_us": 0.0
+    },
+    "eq": {
+      "enabled": true,
+      "low_shelf_hz": 100.0,
+      "low_shelf_db": 0.0,
+      "high_shelf_hz": 8000.0,
+      "high_shelf_db": 0.0,
+      "bands": [
+        {
+          "freq_hz": 3000.0,
+          "gain_db": -1.5,
+          "q": 1.2
+        }
+      ]
+    },
+    "level": {
+      "enabled": true,
+      "mode": "track",
+      "target_lufs": -14.0,
+      "ceiling_dbtp": -1.0,
+      "max_gr_db": 3.0
+    }
+  }
+}

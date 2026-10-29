@@ -4,33 +4,41 @@
 //!   runout process [options] PATH...
 //!   runout analyze FILE...
 //!   runout presets
+//!   runout media
+//!   runout verify FILE...
 //!   runout gen-test-clips DIR
 
-use runout_engine::audio::{self, SourceAudio};
+use runout_engine::audio;
 use runout_engine::export::{self, Sources};
-use runout_engine::project::{self, Project, SourceKind};
-use runout_engine::{auto, batch, ops, presets, selftest};
+use runout_engine::project::{self, Project};
+use runout_engine::{auto, batch, media, presets, selftest};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
 
-const HELP: &str = "runout - vinyl restoration, headless
+const HELP: &str = "runout - analog and digital media restoration, headless
 
 USAGE
   runout --self-test
-      Render a generated test signal through the full chain and check clicks
-      repaired, hum removed, LUFS and true peak. Exits non-zero on failure.
+      Render generated test signals through the vinyl, tape and digital chains
+      and check them: clicks repaired, hum removed, LUFS and true peak, speed
+      and wow recovered, azimuth, dropouts, B-type NR round trip, bit-perfect
+      digital passthrough. Exits non-zero on failure.
 
   runout process [OPTIONS] PATH...
       Restore and export. A PATH that is a folder is imported as one album
       (files in tag/track order, subfolders as discs). A PATH that is a file is
-      one side, split into tracks on silence.
-      --preset NAME     clean-modern, light-wear, worn-70s, or a saved preset
+      one side, split into tracks by the medium's split strategy (silence for
+      vinyl, the hiss floor for tape) unless --no-split.
+      --medium ID       medium preset (default vinyl-lp); see runout media
+      --deck NAME       deck profile to apply
+      --preset NAME     condition preset: clean-modern, light-wear, worn-70s,
+                        cassette-clean, cassette-worn, ..., or a saved preset
+      --no-split        keep each file as one track
       --batch           treat each subfolder of PATH as its own album
       --cleaned         folder files are already cleaned (no restoration, no leveling)
-      --out DIR         export root (default ~/Music/Runout/Artists)
-      --bits 16|24      FLAC bit depth (default 16)
+      --out DIR         export root (default ~/Music/Runout)
+      --bits 16|24      FLAC bit depth (default: the medium's, 16 for vinyl)
       --target LUFS     loudness target (default -14)
       --ceiling DBTP    true-peak ceiling (default -1.0)
       --album-mode      level the album as one, keeping the quiet songs quiet
@@ -39,13 +47,21 @@ USAGE
       --cover FILE      cover image, embedded and saved as cover.jpg
 
   runout analyze FILE...
-      Loudness, true peak, clicks per second, hum, noise floor.
+      Loudness, true peak, clicks per second, hum, noise floor, reference tone.
 
   runout presets
-      List presets.
+      List condition presets.
+
+  runout media
+      List medium presets.
+
+  runout verify FILE...
+      Bit-perfect check of a digital capture: whether the low bits of a
+      24-bit capture of a 16-bit source are all zero, and any runs of zeros or
+      held samples that mark a deck's uncorrectable errors.
 
   runout gen-test-clips DIR
-      Write the reference clips used by the tests.
+      Write the reference clips used by the tests, tape clip included.
 ";
 
 fn main() -> ExitCode {
@@ -60,10 +76,17 @@ fn main() -> ExitCode {
         "analyze" => analyze(&args[1..]),
         "presets" => {
             for p in presets::list() {
-                println!("{:<16} {}{}", p.id, p.name, if p.builtin { "" } else { "  (yours)" });
+                println!("{:<18} {:<9} {}{}", p.id, p.family.label(), p.name, if p.builtin { "" } else { "  (yours)" });
             }
             Ok(())
         }
+        "media" => {
+            for m in media::list() {
+                println!("{:<20} {:<9} {}{}", m.id, m.family.label(), m.name, if m.builtin { "" } else { "  (yours)" });
+            }
+            Ok(())
+        }
+        "verify" => verify(&args[1..]),
         "gen-test-clips" => gen_clips(args.get(1).map(String::as_str).unwrap_or("tests")),
         other => Err(format!("unknown command {other}; try runout --help")),
     };
@@ -77,10 +100,10 @@ fn main() -> ExitCode {
 }
 
 fn self_test() -> Result<(), String> {
-    println!("Runout self-test: generated sweep with hum, hiss and 40 clicks\n");
-    let (checks, secs) = selftest::run();
+    println!("Runout self-test: vinyl sweep with hum, hiss and 40 clicks; a 96 kHz tape clip; a 16-bit digital fixture\n");
+    let (checks, secs) = selftest::run_all();
     for c in &checks {
-        println!("  {:<28} {:<40} {}", c.name, c.value, if c.pass { "ok" } else { "FAIL" });
+        println!("  {:<28} {:<56} {}", c.name, c.value, if c.pass { "ok" } else { "FAIL" });
     }
     println!("\n  took {secs:.1} s");
     if checks.iter().all(|c| c.pass) {
@@ -93,10 +116,13 @@ fn self_test() -> Result<(), String> {
 
 struct Opts {
     preset: Option<String>,
+    medium: Option<String>,
+    deck: Option<String>,
+    no_split: bool,
     batch: bool,
     cleaned: bool,
     out: Option<String>,
-    bits: u16,
+    bits: Option<u16>,
     target: Option<f32>,
     ceiling: Option<f32>,
     album_mode: bool,
@@ -113,10 +139,13 @@ struct Opts {
 fn parse(args: &[String]) -> Result<Opts, String> {
     let mut o = Opts {
         preset: None,
+        medium: None,
+        deck: None,
+        no_split: false,
         batch: false,
         cleaned: false,
         out: None,
-        bits: 16,
+        bits: None,
         target: None,
         ceiling: None,
         album_mode: false,
@@ -137,10 +166,13 @@ fn parse(args: &[String]) -> Result<Opts, String> {
     while i < args.len() {
         match args[i].as_str() {
             "--preset" => o.preset = Some(val(&mut i)?),
+            "--medium" => o.medium = Some(val(&mut i)?),
+            "--deck" => o.deck = Some(val(&mut i)?),
+            "--no-split" => o.no_split = true,
             "--batch" => o.batch = true,
             "--cleaned" => o.cleaned = true,
             "--out" => o.out = Some(val(&mut i)?),
-            "--bits" => o.bits = val(&mut i)?.parse().map_err(|_| "--bits takes 16 or 24")?,
+            "--bits" => o.bits = Some(val(&mut i)?.parse().map_err(|_| "--bits takes 16 or 24")?),
             "--target" => o.target = Some(val(&mut i)?.parse().map_err(|_| "--target takes a number")?),
             "--ceiling" => o.ceiling = Some(val(&mut i)?.parse().map_err(|_| "--ceiling takes a number")?),
             "--album-mode" => o.album_mode = true,
@@ -162,15 +194,10 @@ fn parse(args: &[String]) -> Result<Opts, String> {
     if o.paths.is_empty() {
         return Err("process needs at least one file or folder".into());
     }
-    if o.bits != 16 && o.bits != 24 {
+    if o.bits.map(|b| b != 16 && b != 24).unwrap_or(false) {
         return Err("--bits takes 16 or 24".into());
     }
     Ok(o)
-}
-
-fn load(path: &str) -> runout_engine::Result<Arc<SourceAudio>> {
-    eprintln!("  reading {path}");
-    audio::decode_file(Path::new(path)).map(Arc::new)
 }
 
 fn process(args: &[String]) -> Result<(), String> {
@@ -224,63 +251,31 @@ fn process(args: &[String]) -> Result<(), String> {
     }
 }
 
+fn job_options(o: &Opts) -> batch::JobOptions {
+    batch::JobOptions {
+        batch: batch::BatchOptions {
+            cleaned: o.cleaned,
+            export_root: o.out.clone(),
+            bit_depth: o.bits,
+            target_lufs: o.target,
+            ceiling_dbtp: o.ceiling,
+            album_mode: o.album_mode,
+            no_level: o.no_level,
+        },
+        medium: o.medium.clone(),
+        deck: o.deck.clone(),
+        no_split: o.no_split,
+        artist: o.artist.clone(),
+        album: o.album.clone(),
+        album_artist: o.album_artist.clone(),
+        year: o.year.clone(),
+        genre: o.genre.clone(),
+        cover: o.cover.clone(),
+    }
+}
+
 fn run_job(job: &[PathBuf], o: &Opts, preset: Option<&presets::Preset>) -> Result<export::ExportResult, String> {
-    let mut p = Project::default();
-    let mut sources: Sources = Default::default();
-    if let Some(pr) = preset {
-        p.chain = presets::apply(&p.chain, pr);
-    }
-    let bopts = batch::BatchOptions {
-        cleaned: o.cleaned,
-        export_root: o.out.clone(),
-        bit_depth: Some(o.bits),
-        target_lufs: o.target,
-        ceiling_dbtp: o.ceiling,
-        album_mode: o.album_mode,
-        no_level: o.no_level,
-    };
-    if job.len() == 1 && job[0].is_dir() {
-        let (fp, fs) = batch::folder_project(&job[0], &bopts, preset, &|m| eprintln!("  {m}")).map_err(|e| e.to_string())?;
-        p = fp;
-        sources = fs;
-    } else {
-        for (n, f) in job.iter().enumerate() {
-            let a = load(&f.to_string_lossy()).map_err(|e| e.to_string())?;
-            let name = format!("Side {}", (b'A' + n as u8) as char);
-            let sid = ops::add_source(&mut p, &f.to_string_lossy(), SourceKind::File, true, &name, &a);
-            ops::auto_new_source(&mut p, sid, &a);
-            p.split.threshold_db = auto::auto_split_threshold(&a);
-            ops::split_source(&mut p, sid, &a);
-            sources.insert(sid, a);
-        }
-        if let Some(pr) = preset {
-            p.chain = presets::apply(&p.chain, pr);
-        }
-        let stem = job[0].file_stem().unwrap_or_default().to_string_lossy().to_string();
-        if p.album.album.is_empty() {
-            p.album.album = stem;
-        }
-        for t in p.tracks.iter_mut() {
-            if t.title.is_empty() {
-                t.title = format!("Track {}", t.number.unwrap_or(0));
-            }
-        }
-    }
-    batch::apply_options(&mut p, &bopts);
-    let set = |dst: &mut String, v: &Option<String>| {
-        if let Some(v) = v {
-            *dst = v.clone();
-        }
-    };
-    set(&mut p.album.artist, &o.artist);
-    set(&mut p.album.album, &o.album);
-    set(&mut p.album.album_artist, &o.album_artist);
-    set(&mut p.album.year, &o.year);
-    set(&mut p.album.genre, &o.genre);
-    if let Some(c) = &o.cover {
-        let cp = project::expand_home(c);
-        p.album.cover_path = Some(std::fs::canonicalize(&cp).unwrap_or(cp).to_string_lossy().to_string());
-    }
+    let (mut p, sources): (Project, Sources) = batch::job_project(job, &job_options(o), preset, &|m| eprintln!("  {m}")).map_err(|e| e.to_string())?;
     let cancel = AtomicBool::new(false);
     let last = std::sync::Mutex::new(String::new());
     let progress = |_f: f32, msg: String| {
@@ -316,10 +311,57 @@ fn analyze(args: &[String]) -> Result<(), String> {
         }
         let az = auto::detect_azimuth(&a).unwrap_or(0.0);
         println!("  channel offset {az:.0} us");
-        let regions = auto::split_on_silence(&a, &project::SplitSettings { threshold_db: auto::auto_split_threshold(&a), min_gap_s: 1.2 });
+        let regions = auto::split_on_silence(&a, &project::SplitSettings { threshold_db: auto::auto_split_threshold(&a), min_gap_s: 1.2, ..Default::default() });
         println!("  {} track(s) by silence", regions.len());
+        println!("  hiss floor {:.1} dBFS", auto::hiss_floor_db(&a));
+        if let Some(t) = auto::detect_tone(&a) {
+            println!(
+                "  reference tone {:.2} Hz at {:.1} dBFS from {:.0} s{}",
+                t.freq_hz,
+                t.level_dbfs,
+                t.start_s,
+                t.speed_err_pct.map(|e| format!(", speed {e:+.2}%")).unwrap_or_default()
+            );
+        }
     }
     Ok(())
+}
+
+fn verify(args: &[String]) -> Result<(), String> {
+    if args.is_empty() {
+        return Err("verify needs a file".into());
+    }
+    let mut bad = 0;
+    for f in args {
+        let path = project::expand_home(f);
+        let r = runout_engine::audio::verify_bit_perfect(&path).map_err(|e| e.to_string())?;
+        println!("{}", path.display());
+        println!("  {} Hz, {} ch, {}-bit container, {:.1} s", r.rate, r.channels, r.bits, r.seconds);
+        match r.low_bits_nonzero {
+            None => println!("  16-bit file: nothing below 16 bits to check"),
+            Some(0) => println!("  low 8 bits all zero: a clean 16-bit source, nothing in the path touched it"),
+            Some(n) => {
+                bad += 1;
+                println!("  NOT BIT-PERFECT: {n} samples have low bits set. Something in the path is processing the audio (resampling, volume, dither), or the source really is 24-bit.");
+            }
+        }
+        if r.errors.is_empty() {
+            println!("  no runs of zeros or held samples");
+        } else {
+            println!("  {} run(s) of zeros or held samples, the marks of uncorrectable errors:", r.errors.len());
+            for (t, ms) in r.errors.iter().take(20) {
+                println!("    at {t:.3} s, {ms:.2} ms");
+            }
+            if r.errors.len() > 20 {
+                println!("    and {} more", r.errors.len() - 20);
+            }
+        }
+    }
+    if bad > 0 {
+        Err(format!("{bad} file(s) not bit-perfect"))
+    } else {
+        Ok(())
+    }
 }
 
 fn gen_clips(dir: &str) -> Result<(), String> {
@@ -332,6 +374,8 @@ fn gen_clips(dir: &str) -> Result<(), String> {
     std::fs::write(d.join("clicks_sweep.txt"), positions.join("\n") + "\n").map_err(|e| e.to_string())?;
     let h = selftest::signal(4.0, true, 0);
     audio::write_wav(&d.join("hum_sweep.wav"), h.rate, 16, &h.dirty).map_err(|e| e.to_string())?;
-    println!("wrote clicks_sweep.wav, clicks_sweep_clean.wav, clicks_sweep.txt, hum_sweep.wav to {}", d.display());
+    let t = selftest::tape_signal(selftest::TAPE_CLIP_S);
+    audio::write_wav(&d.join("tape_clip.wav"), t.rate, 24, &t.dirty).map_err(|e| e.to_string())?;
+    println!("wrote clicks_sweep.wav, clicks_sweep_clean.wav, clicks_sweep.txt, hum_sweep.wav, tape_clip.wav to {}", d.display());
     Ok(())
 }

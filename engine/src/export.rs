@@ -2,7 +2,7 @@
 
 use crate::audio::{self, SourceAudio};
 use crate::dsp::loudness;
-use crate::project::{expand_home, Project, SourceKind, Track};
+use crate::project::{expand_home, ExportKind, Project, SourceKind, Track};
 use crate::render;
 use crate::{Error, Result};
 use std::collections::HashMap;
@@ -38,10 +38,59 @@ pub fn safe_name(s: &str) -> String {
     }
 }
 
+/// Where an export goes:
+///
+/// - Album: {root}/{artist}/{album artist} - {album}/ where the artist folder
+///   is the album's artist, falling back to the album artist, then Unknown
+///   Artist.
+/// - Mixtape: {root}/Mixtapes/{title}/
+/// - Recording: {root}/Recordings/{date} {title}/ (date from the year field,
+///   left out when empty).
 pub fn album_dir(p: &Project) -> PathBuf {
-    let artist = if !p.album.album_artist.trim().is_empty() { &p.album.album_artist } else { &p.album.artist };
-    let name = format!("{} - {}", if artist.trim().is_empty() { "Unknown Artist" } else { artist.trim() }, if p.album.album.trim().is_empty() { "Unknown Album" } else { p.album.album.trim() });
-    expand_home(&p.export.root).join(safe_name(&name))
+    let root = expand_home(&p.export.root);
+    let title = || if p.album.album.trim().is_empty() { p.name.trim().to_string() } else { p.album.album.trim().to_string() };
+    match p.export.kind {
+        ExportKind::Album => {
+            let aa = if !p.album.album_artist.trim().is_empty() { &p.album.album_artist } else { &p.album.artist };
+            let name = format!("{} - {}", if aa.trim().is_empty() { "Unknown Artist" } else { aa.trim() }, if p.album.album.trim().is_empty() { "Unknown Album" } else { p.album.album.trim() });
+            let artist = [&p.album.artist, &p.album.album_artist].into_iter().map(|s| s.trim()).find(|s| !s.is_empty()).unwrap_or("Unknown Artist");
+            root.join(safe_name(artist)).join(safe_name(&name))
+        }
+        ExportKind::Mixtape => root.join("Mixtapes").join(safe_name(&title())),
+        ExportKind::Recording => {
+            let date = p.album.year.trim();
+            let name = if date.is_empty() { title() } else { format!("{date} {}", title()) };
+            root.join("Recordings").join(safe_name(&name))
+        }
+    }
+}
+
+/// A track's artist: its own tag, else the album's.
+fn track_artist(p: &Project, t: &Track) -> String {
+    t.tags.artist.clone().filter(|a| !a.trim().is_empty()).unwrap_or_else(|| if p.album.artist.trim().is_empty() { "Unknown Artist".into() } else { p.album.artist.clone() })
+}
+
+/// A track's title, with Recording's automatic "Part N" when it has none.
+pub fn track_title(p: &Project, t: &Track) -> String {
+    if t.title.trim().is_empty() && p.export.kind == ExportKind::Recording {
+        format!("Part {}", t.number.unwrap_or(1))
+    } else {
+        t.title.trim().to_string()
+    }
+}
+
+/// File name for a track in this project's layout.
+pub fn track_file_name_in(p: &Project, t: &Track) -> String {
+    match p.export.kind {
+        ExportKind::Album => track_file_name(t),
+        ExportKind::Mixtape => {
+            if let Some(f) = t.file_name.as_ref().filter(|f| !f.trim().is_empty()) {
+                return safe_name(f);
+            }
+            safe_name(&format!("{:02}. {} - {}", t.number.unwrap_or(0), track_artist(p, t).trim(), t.title.trim()))
+        }
+        ExportKind::Recording => safe_name(&format!("{:02}. {}", t.number.unwrap_or(0), track_title(p, t))),
+    }
 }
 
 pub fn track_file_name(t: &Track) -> String {
@@ -116,6 +165,75 @@ pub struct TagSet {
     pub track: Option<u32>,
     pub track_total: Option<u32>,
     pub disc: Option<u32>,
+}
+
+/// Set extra Vorbis comment fields (MEDIA, RUNOUT_*) on a FLAC, replacing any
+/// already there.
+pub fn write_fields(path: &Path, fields: &[(String, String)]) -> Result<()> {
+    use lofty::config::{ParseOptions, WriteOptions};
+    use lofty::file::AudioFile;
+    use lofty::ogg::tag::VorbisComments;
+    if fields.is_empty() {
+        return Ok(());
+    }
+    let mut f = std::fs::File::open(path).map_err(|e| Error::Io(e.to_string()))?;
+    let mut ff = lofty::flac::FlacFile::read_from(&mut f, ParseOptions::new()).map_err(|e| Error::Encode(format!("tags: {e}")))?;
+    drop(f);
+    if ff.vorbis_comments().is_none() {
+        ff.set_vorbis_comments(VorbisComments::default());
+    }
+    let vc = ff.vorbis_comments_mut().ok_or_else(|| Error::Encode("tags: no vorbis comments".into()))?;
+    for (k, v) in fields {
+        vc.insert(k.clone(), v.clone());
+    }
+    ff.save_to_path(path, WriteOptions::default()).map_err(|e| Error::Encode(format!("tags: {e}")))
+}
+
+/// The MEDIA and RUNOUT_* fields for this project, only the ones that say
+/// something: no NR line on vinyl, no deck line without a deck.
+pub fn media_fields(p: &Project, t: &Track) -> Vec<(String, String)> {
+    let mut v = Vec::new();
+    let m = &p.medium.preset;
+    if !m.media_tag.trim().is_empty() {
+        v.push(("MEDIA".to_string(), m.media_tag.clone()));
+    }
+    if p.medium.id != "vinyl-lp" {
+        v.push(("RUNOUT_MEDIUM".to_string(), m.name.clone()));
+    }
+    let chain = p.effective_chain(t);
+    if let Some(s) = p.source(t.source_id) {
+        let r = s.fx.speed.ratio();
+        let wow = s.fx.wow_map(chain).is_some();
+        if r != 1.0 || wow {
+            let unit = match s.fx.speed.unit {
+                crate::chain::SpeedUnit::Rpm => " rpm",
+                crate::chain::SpeedUnit::Cms => " cm/s",
+                crate::chain::SpeedUnit::Ips => " ips",
+                crate::chain::SpeedUnit::None => "",
+            };
+            let mut txt = if s.fx.speed.unit == crate::chain::SpeedUnit::None { format!("x{r:.4}") } else { format!("{}{unit}, x{r:.4}", trim_num(s.fx.speed.correct)) };
+            if wow {
+                txt.push_str(&format!(", wow corrected from the {}", if chain.wow.reference == crate::chain::WowRef::Hum { "hum" } else { "tone" }));
+            }
+            v.push(("RUNOUT_SPEED".to_string(), txt));
+        }
+    }
+    if chain.nr.enabled && !chain.digital {
+        v.push(("RUNOUT_NR".to_string(), match chain.nr.kind {
+            crate::dsp::nr::NrKind::Btype => format!("B-type decode, reference {:.1} dBFS", chain.nr.ref_dbfs),
+            crate::dsp::nr::NrKind::Dbx2 => "dbx II decode".into(),
+        }));
+    }
+    if let Some(d) = p.deck.as_deref() {
+        let name = crate::media::find_deck(d).map(|d| d.name).unwrap_or_else(|| d.to_string());
+        v.push(("RUNOUT_DECK".to_string(), name));
+    }
+    v
+}
+
+fn trim_num(v: f32) -> String {
+    let s = format!("{v:.3}");
+    s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
 pub fn write_tags(path: &Path, tags: &TagSet, cover: Option<&[u8]>, keep_from: Option<&Path>) -> Result<()> {
@@ -210,8 +328,10 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
     if p.tracks.is_empty() {
         return Err(Error::Project("there are no tracks to export".into()));
     }
-    if let Some(t) = p.tracks.iter().find(|t| t.title.trim().is_empty()) {
-        return Err(Error::Project(format!("track {} has no title", t.number.map(|n| n.to_string()).unwrap_or_else(|| "?".into()))));
+    if p.export.kind != ExportKind::Recording {
+        if let Some(t) = p.tracks.iter().find(|t| t.title.trim().is_empty()) {
+            return Err(Error::Project(format!("track {} has no title", t.number.map(|n| n.to_string()).unwrap_or_else(|| "?".into()))));
+        }
     }
     progress(0.0, "Analyzing".into());
     ensure_analysis(p, sources, &|f, m| progress(f * 0.3, m), cancel)?;
@@ -241,23 +361,28 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
         let srcmeta = p.source(t.source_id).cloned().ok_or(Error::Project("source missing".into()))?;
         let chain = p.effective_chain(t).clone();
         let pass = p.is_passthrough(t);
-        let name = track_file_name(t);
+        let name = track_file_name_in(p, t);
         let path = dir.join(format!("{name}.flac"));
+        let title = track_title(p, t);
 
-        let (ints, bits, after, gr) = if pass {
+        let (ints, bits, after, gr, out_rate, out_ch) = if pass {
             let bits = if src.bits <= 16 { 16 } else { 24 };
             let (start, len) = p.track_range(t).unwrap_or((0, src.frames));
             let ints = src.read_int_interleaved(start as usize, start as usize + len, bits);
             let after = loudness::measure(&ints_to_planar(&ints, src.channels, bits), src.rate).0;
-            (ints, bits, after, 0.0)
+            (ints, bits, after, 0.0, src.rate, src.channels)
         } else {
-            let bits = if p.export.bit_depth >= 24 { 24 } else { 16 };
+            // digital sources keep their depth and are rounded, never dithered,
+            // so samples no stage touched come out exactly as they went in
+            let bits = if chain.digital { if src.bits <= 16 { 16 } else { 24 } } else if p.export.bit_depth >= 24 { 24 } else { 16 };
+            let dither = p.export.dither && !chain.digital;
             let mut fix = t.analysis.as_ref().map(|a| a.ceiling_fix_db).unwrap_or(0.0);
             let mut tries = 0;
             loop {
-                let (audio, gr) = render::render_final(p, t, src, fix).ok_or(Error::Project("render failed".into()))?;
-                let ints = to_int_dithered(&audio, bits, t.id.wrapping_mul(7919) + tries);
-                let after = loudness::measure(&ints_to_planar(&ints, src.channels, bits), src.rate).0;
+                let (audio, gr, rate) = render::render_final_at(p, t, src, fix).ok_or(Error::Project("render failed".into()))?;
+                let chs = audio.len();
+                let ints = if dither { to_int_dithered(&audio, bits, t.id.wrapping_mul(7919) + tries) } else { to_int_rounded(&audio, bits) };
+                let after = loudness::measure(&ints_to_planar(&ints, chs, bits), rate).0;
                 // Re-check: the integer file must not read over the ceiling.
                 if chain.level.enabled && after.true_peak > chain.level.ceiling_dbtp && tries < 3 {
                     fix += after.true_peak - chain.level.ceiling_dbtp + 0.05;
@@ -265,7 +390,7 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
                     continue;
                 }
                 if chain.level.enabled && after.true_peak > chain.level.ceiling_dbtp {
-                    warnings.push(format!("{}: true peak {:.2} dBTP still over the ceiling after 3 tries", t.title, after.true_peak));
+                    warnings.push(format!("{}: true peak {:.2} dBTP still over the ceiling after 3 tries", title, after.true_peak));
                 }
                 if let Some(tt) = p.tracks.iter_mut().find(|x| x.id == t.id) {
                     if let Some(a) = tt.analysis.as_mut() {
@@ -274,15 +399,22 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
                         a.limiter_gr_db = gr;
                     }
                 }
-                break (ints, bits, after, gr);
+                break (ints, bits, after, gr, rate, chs);
             }
         };
-        encode_flac(&path, &ints, src.channels, bits, src.rate)?;
-        let album_artist = if p.album.album_artist.trim().is_empty() { p.album.artist.clone() } else { p.album.album_artist.clone() };
+        encode_flac(&path, &ints, out_ch, bits, out_rate)?;
+        let mixtape = p.export.kind == ExportKind::Mixtape;
+        let album_artist = if mixtape { "Various Artists".to_string() } else if p.album.album_artist.trim().is_empty() { p.album.artist.clone() } else { p.album.album_artist.clone() };
         let tags = TagSet {
-            title: t.title.clone(),
-            artist: if p.album.artist.trim().is_empty() { t.tags.artist.clone().unwrap_or_default() } else { p.album.artist.clone() },
-            album: if p.album.album.trim().is_empty() { t.tags.album.clone().unwrap_or_default() } else { p.album.album.clone() },
+            title: title.clone(),
+            artist: if mixtape { track_artist(p, t) } else if p.album.artist.trim().is_empty() { t.tags.artist.clone().unwrap_or_default() } else { p.album.artist.clone() },
+            album: if mixtape {
+                if p.album.album.trim().is_empty() { p.name.clone() } else { p.album.album.clone() }
+            } else if p.album.album.trim().is_empty() {
+                t.tags.album.clone().unwrap_or_default()
+            } else {
+                p.album.album.clone()
+            },
             album_artist,
             year: if p.album.year.trim().is_empty() { t.tags.year.clone().unwrap_or_default() } else { p.album.year.clone() },
             genre: if p.album.genre.trim().is_empty() { t.tags.genre.clone().unwrap_or_default() } else { p.album.genre.clone() },
@@ -292,13 +424,14 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
         };
         let keep = if srcmeta.kind == SourceKind::Folder { Some(p.resolve(project_dir, &srcmeta.path)) } else { None };
         write_tags(&path, &tags, cover.as_deref(), keep.as_deref())?;
+        write_fields(&path, &media_fields(p, t))?;
         files.push(path);
 
         // report lines
         let an = p.track(t.id).and_then(|x| x.analysis.clone()).unwrap_or_default();
         let gain = p.gain_for(t);
-        let mut l = vec![format!("{} {}", t.number.map(|n| format!("{n:02}.")).unwrap_or_else(|| "--".into()), t.title)];
-        l.push(format!("  File: {name}.flac ({bits}-bit, {} Hz)", src.rate));
+        let mut l = vec![format!("{} {}", t.number.map(|n| format!("{n:02}.")).unwrap_or_else(|| "--".into()), title)];
+        l.push(format!("  File: {name}.flac ({bits}-bit, {out_rate} Hz{})", if out_ch == 1 { ", mono" } else { "" }));
         l.push(format!("  Source: {}, {} to {}", srcmeta.name, fmt_time(t.start_s), fmt_time(t.end_s)));
         if pass {
             l.push("  Cleaned import: passed through untouched, tags only".into());
@@ -306,6 +439,9 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
             l.push(format!("  Settings: {}", if t.chain.is_some() { "own settings for this track" } else { "project settings" }));
             l.push(format!("  Chain: {}", describe_chain(&chain, &srcmeta.fx)));
             l.push(format!("  Clicks repaired: {}, crackle ticks: {}", an.clicks, an.crackles));
+            for extra in tape_report_lines(&chain, &srcmeta.fx, &an) {
+                l.push(extra);
+            }
             l.push(format!(
                 "  Noise floor: {:.1} -> {:.1} dBFS ({:.1} dB lower)",
                 an.noise_before_db,
@@ -316,7 +452,7 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
             l.push(format!("  True peak: {:.2} dBTP -> {:.2} dBTP, limiter at most {:.1} dB", an.before.true_peak, after.true_peak, gr));
             if gain.short_db > 0.05 {
                 l.push(format!("  NOTE: stopped {:.1} dB short of the {:.1} LUFS target; reaching it needs more than {:.1} dB of limiting", gain.short_db, chain.level.target_lufs, chain.level.max_gr_db));
-                warnings.push(format!("{}: {:.1} dB short of target", t.title, gain.short_db));
+                warnings.push(format!("{}: {:.1} dB short of target", title, gain.short_db));
             }
         }
         lines.push(l.join("\n"));
@@ -347,6 +483,12 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
     rep.push_str("Runout processing report\n");
     rep.push_str(&format!("Album: {} - {}\n", p.album.album_artist.trim().is_empty().then(|| p.album.artist.clone()).unwrap_or(p.album.album_artist.clone()), p.album.album));
     rep.push_str(&format!("Exported: {} UTC\n", utc_now()));
+    rep.push_str(&format!(
+        "Medium: {}{}{}\n",
+        p.medium.preset.name,
+        p.medium.condition.as_ref().and_then(|c| crate::presets::find(c)).map(|c| format!(", condition: {}", c.name)).unwrap_or_default(),
+        p.deck.as_ref().map(|d| format!(", deck: {}", crate::media::find_deck(d).map(|x| x.name).unwrap_or_else(|| d.clone()))).unwrap_or_default()
+    ));
     let lv = &p.chain.level;
     rep.push_str(&format!(
         "Leveling: {} mode, target {:.1} LUFS, ceiling {:.1} dBTP, limiter cap {:.1} dB{}\n",
@@ -356,7 +498,18 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
         lv.max_gr_db,
         album_lufs.map(|a| format!(", album loudness {:.1} LUFS (duration weighted)", a)).unwrap_or_default()
     ));
-    rep.push_str(&format!("Output: FLAC, {}-bit{}\n\n", p.export.bit_depth, if p.export.bit_depth == 16 { " with TPDF dither" } else { "" }));
+    if p.chain.digital {
+        rep.push_str("Output: FLAC at the source rate and depth, rounded without dither (untouched samples are bit-identical)\n\n");
+    } else if p.export.rate > 0 || p.export.channels > 0 || !p.export.dither {
+        rep.push_str(&format!(
+            "Output: FLAC, {}-bit{}{}\n\n",
+            p.export.bit_depth,
+            if p.export.dither { " with TPDF dither" } else { "" },
+            if p.export.rate > 0 { format!(", {} Hz", p.export.rate) } else { String::new() }
+        ));
+    } else {
+        rep.push_str(&format!("Output: FLAC, {}-bit{}\n\n", p.export.bit_depth, if p.export.bit_depth == 16 { " with TPDF dither" } else { "" }));
+    }
     rep.push_str(&lines.join("\n\n"));
     rep.push('\n');
     if !warnings.is_empty() {
@@ -367,15 +520,116 @@ pub fn export(p: &mut Project, project_dir: &Path, sources: &Sources, progress: 
     }
     let report = dir.join("Runout report.txt");
     std::fs::write(&report, rep).map_err(|e| Error::Io(e.to_string()))?;
+    // the fully resolved medium, condition and deck, next to the report
+    let resolved = serde_json::json!({
+        "medium": p.medium,
+        "condition": p.medium.condition.as_ref().and_then(|c| crate::presets::find(c)),
+        "deck": p.deck.as_ref().and_then(|d| crate::media::find_deck(d)),
+        "chain": p.chain,
+        "split": p.split,
+        "export": p.export,
+    });
+    std::fs::write(dir.join("preset.json"), serde_json::to_string_pretty(&resolved).unwrap_or_default()).map_err(|e| Error::Io(e.to_string()))?;
     progress(1.0, "Done".into());
     Ok(ExportResult { album_dir: dir, files, report, warnings })
 }
 
+/// Float to integer by plain rounding (digital sources: no dither).
+pub fn to_int_rounded(ch: &[Vec<f32>], bits: u16) -> Vec<i32> {
+    let n = ch.first().map(|c| c.len()).unwrap_or(0);
+    let scale = (1i64 << (bits - 1)) as f64;
+    let mut out = Vec::with_capacity(n * ch.len());
+    for i in 0..n {
+        for c in ch {
+            out.push((c[i] as f64 * scale).round().clamp(-scale, scale - 1.0) as i32);
+        }
+    }
+    out
+}
+
+fn summarize(v: &[f32]) -> (f32, f32, f32) {
+    let mn = v.iter().cloned().fold(f32::MAX, f32::min);
+    let mx = v.iter().cloned().fold(f32::MIN, f32::max);
+    let mean = v.iter().sum::<f32>() / v.len().max(1) as f32;
+    (mn, mx, mean)
+}
+
+/// Report lines for the tape and digital stages, only when they did something.
+pub fn tape_report_lines(c: &crate::chain::Chain, fx: &crate::chain::SourceFx, an: &crate::project::TrackAnalysis) -> Vec<String> {
+    let mut l = Vec::new();
+    if let (true, Some(t)) = (fx.wow_map(c).is_some(), fx.analysis.wow_track()) {
+        let m = t.mean() as f32;
+        let speeds: Vec<f32> = t.freq.iter().map(|f| f / m).collect();
+        let (a, b, mean) = summarize(&speeds);
+        l.push(format!("  Speed curve: x{a:.4} to x{b:.4}, mean x{mean:.4}{}", fx.analysis.wow_weighted_pct.map(|w| format!(", weighted wow and flutter before {w:.3}%")).unwrap_or_default()));
+    }
+    if c.azimuth.enabled {
+        match fx.analysis.azimuth() {
+            Some(curve) => {
+                let (a, b, mean) = summarize(&curve.us);
+                l.push(format!("  Azimuth: {a:.1} to {b:.1} us, mean {mean:.1} us ({})", if c.azimuth.mode == crate::chain::AzimuthMode::Static || (c.azimuth.mode == crate::chain::AzimuthMode::Auto && curve.is_static()) { "static" } else { "tracked" }));
+            }
+            None => l.push(format!("  Azimuth: {:.1} us static", c.azimuth.static_us)),
+        }
+    }
+    if c.dropout.enabled {
+        l.push(format!("  Dropouts repaired: {}{}", an.dropouts, if an.dropouts_flagged > 0 { format!(", {} flagged for manual repair", an.dropouts_flagged) } else { String::new() }));
+    }
+    if c.digital && c.error_repair.enabled {
+        l.push(format!("  Digital errors repaired: {}{}", an.errors, if an.errors_flagged > 0 { format!(", {} flagged for manual repair", an.errors_flagged) } else { String::new() }));
+    }
+    if c.nr.enabled && !c.digital {
+        l.push(match c.nr.kind {
+            crate::dsp::nr::NrKind::Btype => format!("  NR: B-type decode, reference {:.1} dBFS{}", c.nr.ref_dbfs, if c.nr.ref_measured { " (from the tape's level tone)" } else { "" }),
+            crate::dsp::nr::NrKind::Dbx2 => "  NR: dbx II decode".into(),
+        });
+    }
+    l
+}
+
 pub fn describe_chain(c: &crate::chain::Chain, fx: &crate::chain::SourceFx) -> String {
     let mut v = Vec::new();
+    if c.digital {
+        if c.error_repair.enabled {
+            v.push("error repair".to_string());
+        }
+        if c.deemphasis.enabled {
+            v.push("de-emphasis 50/15 us".to_string());
+        }
+        if !fx.repairs.is_empty() {
+            v.push(format!("{} manual repairs on this side", fx.repairs.len()));
+        }
+        return if v.is_empty() { "nothing: bit-identical".into() } else { v.join(", ") };
+    }
     let r = fx.speed.ratio();
     if r != 1.0 {
         v.push(format!("speed x{r:.4}"));
+    }
+    if fx.wow_map(c).is_some() {
+        v.push("wow corrected".into());
+    }
+    if c.azimuth.enabled {
+        v.push("azimuth".into());
+    }
+    if c.channel_mode.enabled && c.channel_mode.mode != crate::chain::ChannelModeKind::Stereo {
+        v.push(
+            match c.channel_mode.mode {
+                crate::chain::ChannelModeKind::MonoSum => "mono sum",
+                crate::chain::ChannelModeKind::MonoLeft => "mono, left channel",
+                crate::chain::ChannelModeKind::MonoRight => "mono, right channel",
+                _ => "mono, best channel",
+            }
+            .to_string(),
+        );
+    }
+    if c.playback_eq.enabled && c.playback_eq.from.curve != c.playback_eq.to.curve {
+        v.push(format!("playback EQ {} to {}", c.playback_eq.from.id, c.playback_eq.to.id));
+    }
+    if c.nr.enabled {
+        v.push(match c.nr.kind {
+            crate::dsp::nr::NrKind::Btype => format!("B-type decode at {:.1} dBFS", c.nr.ref_dbfs),
+            crate::dsp::nr::NrKind::Dbx2 => "dbx II decode".into(),
+        });
     }
     if c.rumble.enabled {
         v.push(format!("rumble {} Hz {} dB/oct{}", c.rumble.freq_hz, c.rumble.slope_db_oct, if c.rumble.linear_phase { " linear phase" } else { "" }));
@@ -395,8 +649,14 @@ pub fn describe_chain(c: &crate::chain::Chain, fx: &crate::chain::SourceFx) -> S
     if c.declip.enabled {
         v.push(format!("declip at {:.2} dBFS", c.declip.level_db));
     }
+    if c.dropout.enabled {
+        v.push(format!("dropout repair at {:.0} dB", c.dropout.depth_db));
+    }
     if c.denoise.enabled {
         v.push(format!("denoise {:.1} dB, smoothing {:.0}%{}", c.denoise.reduction_db, c.denoise.smoothing_pct, if fx.noise.is_none() { " (no profile, skipped)" } else { "" }));
+    }
+    if c.band_limit.enabled {
+        v.push(format!("band limit {:.0} Hz to {:.0} Hz", c.band_limit.low_hz, c.band_limit.high_hz));
     }
     if c.channel.enabled {
         v.push(format!("balance {:+.1} dB{}, azimuth {:.0} us", c.channel.balance_db, if c.channel.swap { ", swapped" } else { "" }, c.channel.azimuth_us));

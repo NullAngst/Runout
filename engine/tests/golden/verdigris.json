@@ -1,0 +1,40 @@
+{
+  "css_root": {
+    "bg": "#0e1917",
+    "border": "#2a3d39",
+    "copper": "#d4884a",
+    "copper-dim": "#5a3a22",
+    "mono": "\"JetBrains Mono\", \"Fira Code\", \"Noto Sans Mono\", \"DejaVu Sans Mono\", monospace",
+    "muted": "#8fa39d",
+    "radius": "8px",
+    "raised": "#172a27",
+    "sans": "\"Inter\", \"Noto Sans\", \"Cantarell\", \"Segoe UI\", system-ui, sans-serif",
+    "serif": "\"Iowan Old Style\", \"Palatino Linotype\", Palatino, \"Noto Serif\", \"DejaVu Serif\", Georgia, serif",
+    "surface": "#132220",
+    "text": "#e6ece9",
+    "verdigris": "#5fb8a5",
+    "verdigris-dim": "#2f5f55",
+    "wave-raw": "#4a5f5a"
+  },
+  "tiles": {
+    "primary_button_text": "#0b1513",
+    "ramp": [
+      "#0e1917",
+      "#1d4a42",
+      "#5fb8a5",
+      "#d4884a",
+      "#f3d9bd"
+    ],
+    "ramp_stops": [
+      0.0,
+      0.35,
+      0.65,
+      0.85,
+      1.0
+    ],
+    "tile_bg": "#0e1917",
+    "wave_mid": "#2a3d39",
+    "wave_proc": "#5fb8a5",
+    "wave_raw": "#4a5f5a"
+  }
+}

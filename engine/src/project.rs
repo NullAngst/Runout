@@ -2,6 +2,7 @@
 //! `<name>.runout/` folder next to the captures it owns.
 
 use crate::chain::{Chain, SourceFx};
+use crate::media::MediumRef;
 use crate::dsp::loudness::Loudness;
 use crate::level::Gain;
 use crate::{Error, Result};
@@ -12,6 +13,11 @@ use std::path::{Path, PathBuf};
 pub const PROJECT_FILE: &str = "project.json";
 pub const AUTOSAVE_FILE: &str = "project.autosave.json";
 pub const TIMELINE_GAP_S: f64 = 2.0;
+pub const VERSION: u32 = 2;
+/// The export root before version 2. A project still holding it reads as
+/// DEFAULT_ROOT; a root anyone typed stays as it is.
+pub const OLD_DEFAULT_ROOT: &str = "~/Music/Runout/Artists";
+pub const DEFAULT_ROOT: &str = "~/Music/Runout";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -74,6 +80,12 @@ pub struct TrackAnalysis {
     pub duration_s: f64,
     /// Ceiling correction needed at export (dB), from the post-export check.
     pub ceiling_fix_db: f32,
+    /// Dropouts repaired, and how many were too long and only flagged.
+    pub dropouts: u32,
+    pub dropouts_flagged: u32,
+    /// Digital errors repaired, and flagged.
+    pub errors: u32,
+    pub errors_flagged: u32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -106,6 +118,23 @@ pub struct Track {
     pub tags: FileTags,
     #[serde(default)]
     pub analysis: Option<TrackAnalysis>,
+    /// Stretches cut out of this track on export, crossfaded (an 8-track
+    /// program change inside a song).
+    #[serde(default)]
+    pub joins: Vec<Join>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct Join {
+    /// Source seconds removed: [start_s, end_s).
+    pub start_s: f64,
+    pub end_s: f64,
+    #[serde(default = "join_xfade_default")]
+    pub xfade_ms: f32,
+}
+
+fn join_xfade_default() -> f32 {
+    40.0
 }
 
 fn fade_in_default() -> f32 {
@@ -126,16 +155,47 @@ pub struct AlbumInfo {
     pub cover_path: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SplitMode {
+    /// Silence below a fixed level (vinyl).
+    #[default]
+    Absolute,
+    /// Silence relative to the measured hiss floor (tape and video).
+    NoiseFloor,
+    /// 8-track program changes.
+    ProgramChange,
+    /// Fixed-length chapters for long recordings.
+    FixedLength,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct SplitSettings {
     pub threshold_db: f32,
     pub min_gap_s: f32,
+    pub mode: SplitMode,
+    /// Above the hiss floor, dB (noise-floor mode).
+    pub floor_margin_db: f32,
+    /// Chapter length, minutes (fixed-length mode).
+    pub chapter_min: f32,
 }
 impl Default for SplitSettings {
     fn default() -> Self {
-        SplitSettings { threshold_db: -45.0, min_gap_s: 1.2 }
+        SplitSettings { threshold_db: -45.0, min_gap_s: 1.2, mode: SplitMode::Absolute, floor_margin_db: 6.0, chapter_min: 30.0 }
     }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportKind {
+    /// Commercial releases: {root}/{artist}/{album artist} - {album}/
+    #[default]
+    Album,
+    /// Compilations, radio rips, mixes: {root}/Mixtapes/{title}/
+    Mixtape,
+    /// Dictation, family tapes, airchecks, lectures: {root}/Recordings/{date} {title}/
+    Recording,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -144,10 +204,18 @@ pub struct ExportSettings {
     pub bit_depth: u16,
     /// Export root; ~ expands to the home folder.
     pub root: String,
+    pub kind: ExportKind,
+    /// Output rate, Hz; 0 keeps the source rate.
+    pub rate: u32,
+    /// Output channels; 0 keeps what the chain gives (mono modes give 1).
+    pub channels: u16,
+    /// TPDF dither when going to 16-bit (off for digital sources, which are
+    /// rounded so untouched samples come out exactly as they went in).
+    pub dither: bool,
 }
 impl Default for ExportSettings {
     fn default() -> Self {
-        ExportSettings { bit_depth: 16, root: "~/Music/Runout/Artists".into() }
+        ExportSettings { bit_depth: 16, root: DEFAULT_ROOT.into(), kind: ExportKind::Album, rate: 0, channels: 0, dither: true }
     }
 }
 
@@ -156,6 +224,11 @@ impl Default for ExportSettings {
 pub struct Project {
     pub version: u32,
     pub name: String,
+    /// What the recordings are: decides the capture path, the stages, the
+    /// split strategy and the export. Version 1 projects read as Vinyl LP.
+    pub medium: MediumRef,
+    /// Deck profile id, if one is in use.
+    pub deck: Option<String>,
     pub chain: Chain,
     pub sources: Vec<Source>,
     pub tracks: Vec<Track>,
@@ -168,8 +241,10 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Project {
-            version: 1,
+            version: VERSION,
             name: "Untitled".into(),
+            medium: MediumRef::default(),
+            deck: None,
             chain: Chain::default(),
             sources: Vec::new(),
             tracks: Vec::new(),
@@ -214,10 +289,12 @@ impl Project {
         t.chain.as_ref().unwrap_or(&self.chain)
     }
 
-    /// A track passes through untouched: cleaned import with every stage still off.
+    /// A track passes through untouched: a cleaned import, or a digital source,
+    /// with every stage still off.
     pub fn is_passthrough(&self, t: &Track) -> bool {
         let c = self.effective_chain(t);
-        t.cleaned
+        (t.cleaned || c.digital)
+            && t.joins.is_empty()
             && c.restoration_off()
             && !c.level.enabled
             && self.source(t.source_id).map(|s| s.fx.speed.ratio() == 1.0 && s.fx.repairs.is_empty()).unwrap_or(true)
@@ -251,21 +328,32 @@ impl Project {
     pub fn track_range(&self, t: &Track) -> Option<(i64, usize)> {
         let s = self.source(t.source_id)?;
         let r = s.fx.speed.ratio();
-        let a = (t.start_s * s.rate as f64 / r).round() as i64;
-        let b = (t.end_s * s.rate as f64 / r).round() as i64;
+        let chain = self.effective_chain(t);
+        let (a, b) = if s.fx.wow_map(chain).is_some() {
+            (s.fx.to_processed(chain, t.start_s * s.rate as f64).round() as i64, s.fx.to_processed(chain, t.end_s * s.rate as f64).round() as i64)
+        } else {
+            ((t.start_s * s.rate as f64 / r).round() as i64, (t.end_s * s.rate as f64 / r).round() as i64)
+        };
         let max = (s.frames as f64 / r).floor() as i64;
         let a = a.clamp(0, max);
         let b = b.clamp(a, max);
         Some((a, (b - a) as usize))
     }
 
-    /// Everything that changes a track's cleaned audio, hashed.
+    /// Everything that changes a track's cleaned audio, hashed. A track whose
+    /// settings a version 1 project could hold hashes exactly as version 1 did,
+    /// so its stored analysis stays fresh across the upgrade.
     pub fn track_key(&self, t: &Track) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut chain = self.effective_chain(t).clone();
         chain.level = Default::default();
         let src = self.source(t.source_id);
-        let s = serde_json::to_string(&(chain, src.map(|s| &s.fx), t.start_s, t.end_s, t.fade_in_ms, t.fade_out_ms, t.cleaned)).unwrap_or_default();
+        let v1 = chain.new_stages_default() && src.map(|s| s.fx.new_fields_default()).unwrap_or(true) && t.joins.is_empty() && self.export.rate == 0 && self.export.channels == 0;
+        let s = if v1 {
+            serde_json::to_string(&(v1_view::Chain::of(&chain), src.map(|s| v1_view::Fx::of(&s.fx)), t.start_s, t.end_s, t.fade_in_ms, t.fade_out_ms, t.cleaned)).unwrap_or_default()
+        } else {
+            serde_json::to_string(&(&chain, src.map(|s| &s.fx), t.start_s, t.end_s, t.fade_in_ms, t.fade_out_ms, t.cleaned, &t.joins, self.export.rate, self.export.channels)).unwrap_or_default()
+        };
         let mut h = std::collections::hash_map::DefaultHasher::new();
         s.hash(&mut h);
         h.finish()
@@ -298,19 +386,72 @@ impl Project {
     }
 
     pub fn load(dir: &Path) -> Result<Project> {
-        let txt = std::fs::read_to_string(dir.join(PROJECT_FILE)).map_err(|e| Error::Io(format!("{}: {e}", dir.display())))?;
-        serde_json::from_str(&txt).map_err(|e| Error::Project(e.to_string()))
+        Self::load_file(&dir.join(PROJECT_FILE))
     }
 
+    /// Read a project.json (or its autosave). Version 1 files load as Vinyl LP
+    /// with every setting as it was; the analysis curves next to it load too.
     pub fn load_file(path: &Path) -> Result<Project> {
         let txt = std::fs::read_to_string(path).map_err(|e| Error::Io(format!("{}: {e}", path.display())))?;
-        serde_json::from_str(&txt).map_err(|e| Error::Project(e.to_string()))
+        let mut p: Project = serde_json::from_str(&txt).map_err(|e| Error::Project(e.to_string()))?;
+        p.migrate();
+        if let Some(dir) = path.parent() {
+            p.load_analysis(dir);
+        }
+        Ok(p)
+    }
+
+    /// Bring a just-read project up to the current version.
+    pub fn migrate(&mut self) {
+        if self.export.root == OLD_DEFAULT_ROOT {
+            self.export.root = DEFAULT_ROOT.into();
+        }
+        self.version = VERSION;
+    }
+
+    /// Load every source's analysis curves from `dir/analysis/`.
+    pub fn load_analysis(&mut self, dir: &Path) {
+        for s in self.sources.iter_mut() {
+            if !s.fx.analysis.is_empty() {
+                let rate = s.rate;
+                s.fx.analysis.load(dir, rate);
+            }
+        }
+    }
+
+    /// Take the loaded curve data from `old` for every source whose analysis
+    /// files are the same: a project edited in the UI comes back without it.
+    pub fn adopt_analysis(&mut self, old: &Project) {
+        for s in self.sources.iter_mut() {
+            if let Some(o) = old.source(s.id) {
+                let (a, b) = (&s.fx.analysis, &o.fx.analysis);
+                if a.data.0.is_none() && a.speed_curve == b.speed_curve && a.azimuth_curve == b.azimuth_curve && a.dropout_map == b.dropout_map && a.error_map == b.error_map {
+                    s.fx.analysis.data = b.data.clone();
+                }
+            }
+        }
+    }
+
+    /// Write every source's loaded analysis curves into `dir/analysis/`.
+    pub fn write_analysis(&self, dir: &Path) -> Result<()> {
+        for s in &self.sources {
+            s.fx.analysis.write(dir, s.rate)?;
+        }
+        Ok(())
     }
 
     /// Atomic save: write a temp file, then rename over the target.
     pub fn save_as(&self, dir: &Path, file: &str) -> Result<()> {
         std::fs::create_dir_all(dir).map_err(|e| Error::Io(e.to_string()))?;
-        let txt = serde_json::to_string_pretty(self).map_err(|e| Error::Project(e.to_string()))?;
+        self.write_analysis(dir)?;
+        let txt = if self.version == VERSION {
+            serde_json::to_string_pretty(self)
+        } else {
+            let mut p = self.clone();
+            p.version = VERSION;
+            serde_json::to_string_pretty(&p)
+        }
+        .map_err(|e| Error::Project(e.to_string()))?;
         let tmp = dir.join(format!(".{file}.tmp"));
         std::fs::write(&tmp, txt).map_err(|e| Error::Io(e.to_string()))?;
         std::fs::rename(&tmp, dir.join(file)).map_err(|e| Error::Io(e.to_string()))?;
@@ -321,6 +462,73 @@ impl Project {
         self.save_as(dir, PROJECT_FILE)?;
         let _ = std::fs::remove_file(dir.join(AUTOSAVE_FILE));
         Ok(())
+    }
+}
+
+/// How version 1 serialized the chain and source settings, used only to hash a
+/// track's settings the same way version 1 did.
+mod v1_view {
+    use crate::chain;
+    use crate::dsp::denoise::NoiseProfile;
+    use serde::Serialize;
+
+    #[derive(Serialize)]
+    pub struct Hum<'a> {
+        enabled: bool,
+        mains_hz: f32,
+        harmonics: u32,
+        width_hz: f32,
+        #[serde(skip)]
+        _p: std::marker::PhantomData<&'a ()>,
+    }
+
+    #[derive(Serialize)]
+    pub struct Chain<'a> {
+        rumble: &'a chain::Rumble,
+        hum: Hum<'a>,
+        declick: &'a chain::Declick,
+        decrackle: &'a chain::Decrackle,
+        declip: &'a chain::Declip,
+        denoise: &'a chain::Denoise,
+        channel: &'a chain::ChannelTools,
+        eq: &'a chain::Eq,
+        level: &'a chain::Level,
+    }
+
+    impl<'a> Chain<'a> {
+        pub fn of(c: &'a chain::Chain) -> Self {
+            Chain {
+                rumble: &c.rumble,
+                hum: Hum { enabled: c.hum.enabled, mains_hz: c.hum.mains_hz, harmonics: c.hum.harmonics, width_hz: c.hum.width_hz, _p: std::marker::PhantomData },
+                declick: &c.declick,
+                decrackle: &c.decrackle,
+                declip: &c.declip,
+                denoise: &c.denoise,
+                channel: &c.channel,
+                eq: &c.eq,
+                level: &c.level,
+            }
+        }
+    }
+
+    #[derive(Serialize)]
+    struct Speed {
+        captured_rpm: f32,
+        correct_rpm: f32,
+        cents: f32,
+    }
+
+    #[derive(Serialize)]
+    pub struct Fx<'a> {
+        speed: Speed,
+        noise: &'a Option<NoiseProfile>,
+        repairs: &'a Vec<chain::Repair>,
+    }
+
+    impl<'a> Fx<'a> {
+        pub fn of(f: &'a chain::SourceFx) -> Self {
+            Fx { speed: Speed { captured_rpm: f.speed.captured, correct_rpm: f.speed.correct, cents: f.speed.cents }, noise: &f.noise, repairs: &f.repairs }
+        }
     }
 }
 

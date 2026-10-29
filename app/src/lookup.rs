@@ -70,7 +70,9 @@ fn quote(x: &str) -> String {
     x.replace('"', "")
 }
 
-pub fn search(artist: &str, album: &str) -> Result<Vec<ReleaseHit>, String> {
+/// Search releases. `format` (the medium's MusicBrainz format: Vinyl,
+/// Cassette, DAT, ...) narrows the results to that format; empty searches all.
+pub fn search(artist: &str, album: &str, format: &str) -> Result<Vec<ReleaseHit>, String> {
     let mut q = Vec::new();
     if !artist.trim().is_empty() {
         q.push(format!("artist:\"{}\"", quote(artist.trim())));
@@ -80,6 +82,9 @@ pub fn search(artist: &str, album: &str) -> Result<Vec<ReleaseHit>, String> {
     }
     if q.is_empty() {
         return Err("enter an artist or album to search for".into());
+    }
+    if !format.trim().is_empty() {
+        q.push(format!("format:\"{}\"", quote(format.trim())));
     }
     let url = format!("https://musicbrainz.org/ws/2/release/?query={}&fmt=json&limit=15", enc(&q.join(" AND ")));
     let v = get(&url)?;
@@ -96,8 +101,12 @@ pub fn search(artist: &str, album: &str) -> Result<Vec<ReleaseHit>, String> {
             tracks: r["track-count"].as_u64().unwrap_or(0) as u32,
         });
     }
-    // vinyl first
-    out.sort_by_key(|h| !h.format.to_lowercase().contains("vinyl"));
+    // the medium's format only; MusicBrainz names tapes "Cassette", reels
+    // "Reel-to-reel", and so on, so a plain substring match fits
+    if !format.trim().is_empty() {
+        let f = format.trim().to_lowercase();
+        out.retain(|h| h.format.to_lowercase().contains(&f));
+    }
     Ok(out)
 }
 

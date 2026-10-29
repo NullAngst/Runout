@@ -15,7 +15,7 @@
         onclick={() => onToggle?.(!enabled)}></button>
     {/if}
     <h3 title={tip}>{title}</h3>
-    {#if badge}<span class="tag verdigris">{badge}</span>{/if}
+    {#if badge}<span class="tag accent">{badge}</span>{/if}
     <span class="grow"></span>
     {#if onAuto}<button class="ghost" title="Analyze the audio and pick starting values" onclick={onAuto}>Auto</button>{/if}
   </div>

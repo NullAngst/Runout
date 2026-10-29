@@ -18,6 +18,11 @@ impl Biquad {
         Biquad { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0, z1: 0.0, z2: 0.0 }
     }
 
+    /// A section from normalized coefficients (a0 = 1).
+    pub fn from_coeffs(b0: f64, b1: f64, b2: f64, a1: f64, a2: f64) -> Self {
+        Biquad { b0, b1, b2, a1, a2, z1: 0.0, z2: 0.0 }
+    }
+
     pub fn highpass(fs: f64, f: f64, q: f64) -> Self {
         let w = 2.0 * PI * f / fs;
         let (s, c) = w.sin_cos();
@@ -105,6 +110,15 @@ impl Biquad {
         self.z2 = 0.0;
     }
 
+    /// Group delay at DC, samples.
+    pub fn group_delay_dc(&self) -> f64 {
+        let nb = self.b0 + self.b1 + self.b2;
+        let na = 1.0 + self.a1 + self.a2;
+        let tb = if nb.abs() > 1e-18 { (self.b1 + 2.0 * self.b2) / nb } else { 0.0 };
+        let ta = if na.abs() > 1e-18 { (self.a1 + 2.0 * self.a2) / na } else { 0.0 };
+        tb - ta
+    }
+
     /// Magnitude response at frequency f.
     pub fn magnitude(&self, fs: f64, f: f64) -> f64 {
         let w = 2.0 * PI * f / fs;
@@ -131,6 +145,28 @@ pub fn butter_highpass(fs: f64, f: f64, order: usize) -> Vec<Biquad> {
         out.push(Biquad::highpass1(fs, f));
     }
     out
+}
+
+/// Butterworth lowpass of the given order as a cascade of sections.
+pub fn butter_lowpass(fs: f64, f: f64, order: usize) -> Vec<Biquad> {
+    let mut out = Vec::new();
+    let n = order.max(1);
+    for k in 0..n / 2 {
+        let theta = PI * (2 * k + 1) as f64 / (2 * n) as f64;
+        let q = 1.0 / (2.0 * theta.cos());
+        out.push(Biquad::lowpass(fs, f, q));
+    }
+    if n % 2 == 1 {
+        let k = (PI * f / fs).tan();
+        let a0 = 1.0 + k;
+        out.push(Biquad::norm(k, k, 0.0, a0, k - 1.0, 0.0));
+    }
+    out
+}
+
+/// Magnitude of a cascade at frequency f.
+pub fn cascade_magnitude(sections: &[Biquad], fs: f64, f: f64) -> f64 {
+    sections.iter().map(|s| s.magnitude(fs, f)).product()
 }
 
 pub fn run_cascade(sections: &mut [Biquad], buf: &mut [f32]) {

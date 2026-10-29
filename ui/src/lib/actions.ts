@@ -88,20 +88,29 @@ export function markBoundary() {
   run(() => api.markBoundary(ui.tick.pos));
 }
 
+/** Every event [ and ] hop between: clicks, dropouts, digital errors and
+ * program changes, in timeline order. */
+function eventTimes(): number[] {
+  const out = ui.clicks.map(([t]) => t);
+  for (const e of ui.view?.events ?? []) out.push(e.g);
+  out.sort((a, b) => a - b);
+  return out;
+}
+
 export function jumpClick(dir: 1 | -1) {
   const p = ui.tick.pos;
   const eps = 0.002;
-  const list = ui.clicks;
-  if (!list.length) return toast('No click map yet: run Analyze in the Clean step.');
+  const list = eventTimes();
+  if (!list.length) return toast('No events yet: run Analyze in the Clean step for the click and dropout maps.');
   let target: number | null = null;
   if (dir > 0) {
-    for (const [t] of list) if (t > p + eps) { target = t; break; }
+    for (const t of list) if (t > p + eps) { target = t; break; }
   } else {
-    for (let i = list.length - 1; i >= 0; i--) if (list[i][0] < p - eps) { target = list[i][0]; break; }
+    for (let i = list.length - 1; i >= 0; i--) if (list[i] < p - eps) { target = list[i]; break; }
   }
   if (target == null) return;
   seekTo(target);
-  // zoom in around the click so it can be seen
+  // zoom in around the event so it can be seen
   const span = Math.min(ui.t1 - ui.t0, 1.0);
   ui.t0 = Math.max(0, target - span / 2);
   ui.t1 = ui.t0 + span;
@@ -185,11 +194,12 @@ export function onJob(job: string, ok: boolean, data: any, error: string | undef
       setView(data);
       fit();
       ui.step = 1;
-      toast(job === 'folder' ? 'Folder imported.' : 'Imported and split on silence. Check the boundaries.');
+      toast(job === 'folder' ? 'Folder imported.' : 'Imported as one track per side. Split it in the Split step.');
       break;
     case 'analyze':
       setView(data);
       api.clicks().then((c) => (ui.clicks = c));
+      for (const n of (data.notes ?? []) as string[]) toast(n);
       toast('Analysis done.');
       break;
     case 'export':

@@ -1,0 +1,122 @@
+{
+  "v1_preset_chain": {
+    "channel": {
+      "azimuth_us": 0.0,
+      "balance_db": 0.0,
+      "enabled": false,
+      "swap": false
+    },
+    "declick": {
+      "enabled": true,
+      "max_len_ms": 2.0,
+      "threshold_db": 12.0
+    },
+    "declip": {
+      "enabled": false,
+      "level_db": -0.10000000149011612,
+      "max_len_ms": 2.0
+    },
+    "decrackle": {
+      "enabled": true,
+      "max_len_ms": 0.25,
+      "threshold_db": 10.5
+    },
+    "denoise": {
+      "enabled": true,
+      "reduction_db": 7.5,
+      "smoothing_pct": 50.0
+    },
+    "eq": {
+      "bands": [
+        {
+          "freq_hz": 3000.0,
+          "gain_db": -1.5,
+          "q": 1.2000000476837158
+        }
+      ],
+      "enabled": true,
+      "high_shelf_db": 0.0,
+      "high_shelf_hz": 8000.0,
+      "low_shelf_db": 0.0,
+      "low_shelf_hz": 100.0
+    },
+    "hum": {
+      "enabled": false,
+      "harmonics": 4,
+      "mains_hz": 60.0,
+      "width_hz": 1.0
+    },
+    "level": {
+      "ceiling_dbtp": -1.0,
+      "enabled": true,
+      "max_gr_db": 3.0,
+      "mode": "track",
+      "target_lufs": -14.0
+    },
+    "rumble": {
+      "enabled": true,
+      "freq_hz": 20.0,
+      "linear_phase": false,
+      "slope_db_oct": 24
+    }
+  },
+  "v1_preset_render_clicks_sweep_f32_sha256": "7e37e63ae66878e8e836816ecc13a51cc7178c8a72a0b044af3a8093a1313ebf",
+  "v1_project_block_10s_f32_sha256": "7028631e08a96c5874fb6d47377c68d1edfa7ba042e080cdc93dc688bfb68618",
+  "v1_project_chain": {
+    "channel": {
+      "azimuth_us": 12.0,
+      "balance_db": 0.5,
+      "enabled": true,
+      "swap": false
+    },
+    "declick": {
+      "enabled": true,
+      "max_len_ms": 2.0,
+      "threshold_db": 13.0
+    },
+    "declip": {
+      "enabled": false,
+      "level_db": -0.10000000149011612,
+      "max_len_ms": 2.0
+    },
+    "decrackle": {
+      "enabled": true,
+      "max_len_ms": 0.25,
+      "threshold_db": 11.0
+    },
+    "denoise": {
+      "enabled": true,
+      "reduction_db": 6.0,
+      "smoothing_pct": 50.0
+    },
+    "eq": {
+      "bands": [],
+      "enabled": false,
+      "high_shelf_db": 0.0,
+      "high_shelf_hz": 8000.0,
+      "low_shelf_db": 0.0,
+      "low_shelf_hz": 100.0
+    },
+    "hum": {
+      "enabled": true,
+      "harmonics": 4,
+      "mains_hz": 60.0,
+      "width_hz": 1.0
+    },
+    "level": {
+      "ceiling_dbtp": -1.0,
+      "enabled": true,
+      "max_gr_db": 3.0,
+      "mode": "track",
+      "target_lufs": -14.0
+    },
+    "rumble": {
+      "enabled": true,
+      "freq_hz": 20.0,
+      "linear_phase": false,
+      "slope_db_oct": 24
+    }
+  },
+  "v1_project_full_render_f32_sha256": "965ca2c1799787981f6fcda51138d579ba5996e4765ed796002c089a358409d8",
+  "v1_project_track_key": "1669536493248598082"
+}

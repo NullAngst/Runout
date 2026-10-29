@@ -64,7 +64,7 @@
   </div>
 </div>
 {#if ui.tick.warn}
-  <div class="warn copper small">{ui.tick.warn}</div>
+  <div class="warn attention small">{ui.tick.warn}</div>
 {/if}
 
 <style>
@@ -75,9 +75,9 @@
   .meters { gap: 12px; }
   .pk { gap: 3px; width: 160px; }
   .meter { position: relative; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
-  .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--verdigris); transition: width 50ms linear; }
-  .fill.hot { background: var(--copper); }
+  .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); transition: width 50ms linear; }
+  .fill.hot { background: var(--attention); }
   .hold { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); }
   .vals { display: flex; gap: 12px; flex-wrap: wrap; }
-  .warn { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--copper-dim); padding: 6px 12px; border-radius: 6px; }
+  .warn { position: absolute; bottom: 62px; left: 50%; transform: translateX(-50%); background: var(--raised); border: 1px solid var(--attention-dim); padding: 6px 12px; border-radius: var(--radius-btn); }
 </style>

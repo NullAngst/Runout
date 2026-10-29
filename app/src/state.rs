@@ -26,6 +26,8 @@ pub struct Inner {
     pub clicks: HashMap<u64, Vec<ClickHit>>,
     /// Per source, processed peaks from the last analysis.
     pub peaks: HashMap<u64, Vec<(f32, f32)>>,
+    /// Per source, the 8-track program changes the last search found.
+    pub program_changes: HashMap<u64, Vec<runout_engine::auto::ProgramChange>>,
     pub gen: u64,
 }
 
@@ -39,6 +41,8 @@ pub struct App {
     pub session: Mutex<Session>,
     /// Session found at launch, for the recovery prompt.
     pub recovery: Mutex<Option<Session>>,
+    /// Colors for the pictures drawn in Rust, from the theme.
+    pub palette: Mutex<runout_engine::tiles::Palette>,
 }
 
 #[derive(Serialize)]
@@ -50,6 +54,22 @@ pub struct TrackView {
     pub short_db: f32,
     pub fresh: bool,
     pub passthrough: bool,
+}
+
+/// A dropout, digital error or program change on the timeline, for the
+/// overlays and the [ and ] keys.
+#[derive(Serialize)]
+pub struct EventView {
+    /// Global timeline seconds.
+    pub g: f64,
+    pub len: f64,
+    pub kind: runout_engine::analysis::EventKind,
+    pub source_id: u64,
+    /// Source seconds, for program change joins.
+    pub start_s: f64,
+    pub end_s: f64,
+    /// Program changes: a song plays straight through it.
+    pub spans_song: bool,
 }
 
 #[derive(Serialize)]
@@ -65,13 +85,20 @@ pub struct ProjectView {
     pub stale: usize,
     pub export_dir: String,
     pub analysed: bool,
+    pub events: Vec<EventView>,
 }
+
+/// Most events sent to the window; a badly damaged tape can have thousands.
+const MAX_EVENTS: usize = 5000;
 
 impl App {
     pub fn new() -> Self {
         let session = Session::load();
         let recovery = if session.open_project.is_some() || session.capture.is_some() { Some(session.clone()) } else { None };
+        let prefs = Prefs::load();
+        let palette = runout_engine::tiles::Palette::named(&prefs.theme);
         App {
+            palette: Mutex::new(palette),
             inner: Mutex::new(Inner {
                 project: Project::default(),
                 dir: None,
@@ -81,13 +108,14 @@ impl App {
                 audio: HashMap::new(),
                 clicks: HashMap::new(),
                 peaks: HashMap::new(),
+                program_changes: HashMap::new(),
                 gen: 1,
             }),
             player: Player::new(),
             capture: Mutex::new(None),
             busy: Mutex::new(None),
             cancel: AtomicBool::new(false),
-            prefs: Mutex::new(Prefs::load()),
+            prefs: Mutex::new(prefs),
             session: Mutex::new(Session::default()),
             recovery: Mutex::new(recovery),
         }
@@ -100,7 +128,9 @@ impl App {
 
     /// Replace the project as one undoable edit. Edits with the same label
     /// within a second merge, so dragging a slider is one undo step.
-    pub fn commit(&self, inner: &mut Inner, new: Project, label: &str) {
+    pub fn commit(&self, inner: &mut Inner, mut new: Project, label: &str) {
+        // a project that came back from the UI has no curve data loaded
+        new.adopt_analysis(&inner.project);
         if new == inner.project {
             return;
         }
@@ -137,6 +167,7 @@ impl App {
             })
             .collect::<Vec<_>>();
         let stale = tracks.iter().filter(|t| !t.fresh).count();
+        let events = Self::events(inner, &layout);
         ProjectView {
             project: p.clone(),
             dir: inner.dir.as_ref().map(|d| d.to_string_lossy().to_string()),
@@ -149,7 +180,37 @@ impl App {
             stale,
             export_dir: runout_engine::export::album_dir(p).to_string_lossy().to_string(),
             analysed: !inner.clicks.is_empty(),
+            events,
         }
+    }
+
+    fn events(inner: &Inner, layout: &[Placement]) -> Vec<EventView> {
+        use runout_engine::analysis::EventKind;
+        let mut out = Vec::new();
+        for l in layout {
+            let Some(s) = inner.project.source(l.source_id) else { continue };
+            for e in s.fx.analysis.dropouts().iter().chain(s.fx.analysis.errors().iter()) {
+                out.push(EventView { g: l.start + e.start_s / l.ratio, len: e.len_s / l.ratio, kind: e.kind, source_id: l.source_id, start_s: e.start_s, end_s: e.start_s + e.len_s, spans_song: false });
+            }
+            if let Some(v) = inner.program_changes.get(&l.source_id) {
+                for c in v {
+                    out.push(EventView { g: l.start + c.start_s / l.ratio, len: (c.end_s - c.start_s) / l.ratio, kind: EventKind::ProgramChange, source_id: l.source_id, start_s: c.start_s, end_s: c.end_s, spans_song: c.spans_song });
+                }
+            }
+        }
+        out.sort_by(|a, b| a.g.partial_cmp(&b.g).unwrap_or(std::cmp::Ordering::Equal));
+        if out.len() > MAX_EVENTS {
+            // keep the flagged ones, thin the rest evenly
+            let flagged: Vec<EventView> = out.iter().filter(|e| matches!(e.kind, EventKind::DropoutFlagged | EventKind::ErrorFlagged | EventKind::ProgramChange)).map(|e| EventView { ..*e }).collect();
+            let room = MAX_EVENTS.saturating_sub(flagged.len()).max(1);
+            let rest: Vec<&EventView> = out.iter().filter(|e| matches!(e.kind, EventKind::Dropout | EventKind::Error)).collect();
+            let step = (rest.len() as f64 / room as f64).max(1.0);
+            let mut keep: Vec<EventView> = (0..room.min(rest.len())).map(|i| EventView { ..*rest[(i as f64 * step) as usize] }).collect();
+            keep.extend(flagged);
+            keep.sort_by(|a, b| a.g.partial_cmp(&b.g).unwrap_or(std::cmp::Ordering::Equal));
+            return keep;
+        }
+        out
     }
 
     /// Global timeline seconds -> (source id, source seconds).

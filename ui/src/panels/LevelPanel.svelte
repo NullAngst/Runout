@@ -62,11 +62,11 @@
           <td class="ttl">{r.t.title || 'Untitled'}</td>
           <td class="num mono">{fmt(a?.before.integrated)}</td>
           <td class="num mono">{a ? (r.tv.passthrough ? 'off' : (r.tv.gain_db >= 0 ? '+' : '') + r.tv.gain_db.toFixed(1)) : '--'}</td>
-          <td class="num mono" class:copper={r.tv.short_db > 0.05}>{a ? fmt(on ? a.before.integrated + r.tv.gain_db : a.before.integrated) : '--'}</td>
+          <td class="num mono" class:attention={r.tv.short_db > 0.05}>{a ? fmt(on ? a.before.integrated + r.tv.gain_db : a.before.integrated) : '--'}</td>
           <td class="num mono">{a ? fmt(on ? Math.min(lv.ceiling_dbtp, a.before.true_peak + r.tv.gain_db) : a.before.true_peak, 2) : '--'}</td>
         </tr>
         {#if a && r.tv.short_db > 0.05}
-          <tr><td></td><td colspan="5" class="copper">Stops {r.tv.short_db.toFixed(1)} dB short: reaching the target needs more than {(r.t.chain ?? ui.view.project.chain).level.max_gr_db} dB of limiting.</td></tr>
+          <tr><td></td><td colspan="5" class="attention">Stops {r.tv.short_db.toFixed(1)} dB short: reaching the target needs more than {(r.t.chain ?? ui.view.project.chain).level.max_gr_db} dB of limiting.</td></tr>
         {/if}
       {/each}
     </tbody>

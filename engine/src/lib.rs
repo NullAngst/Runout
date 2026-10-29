@@ -1,6 +1,7 @@
 //! Runout engine: everything that touches audio. Shared by the desktop app and
 //! the `runout` command-line tool.
 
+pub mod analysis;
 pub mod audio;
 pub mod batch;
 pub mod auto;
@@ -8,6 +9,7 @@ pub mod chain;
 pub mod dsp;
 pub mod export;
 pub mod level;
+pub mod media;
 pub mod ops;
 pub mod presets;
 pub mod project;

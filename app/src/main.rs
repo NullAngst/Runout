@@ -3,6 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod capture;
+mod iec958;
 mod commands;
 mod lookup;
 mod player;
@@ -109,6 +110,22 @@ fn main() {
             commands::batch_run,
             commands::tile_wave,
             commands::tile_spec,
+            commands::tile_overlay,
+            commands::media_info_get,
+            commands::medium_set,
+            commands::medium_save,
+            commands::medium_delete,
+            commands::medium_visible,
+            commands::deck_save,
+            commands::deck_delete,
+            commands::deck_measure,
+            commands::settings_get,
+            commands::settings_set,
+            commands::set_theme,
+            commands::find_program_changes,
+            commands::split_program_changes,
+            commands::join_program_change,
+            commands::speed_from_length,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Runout")

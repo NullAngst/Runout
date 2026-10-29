@@ -1,8 +1,9 @@
 <script lang="ts">
   // The timeline: waveform and spectrogram pictures rendered in Rust, with the
-  // click map, track regions, repairs, selection and playhead drawn on top.
-  import { api } from '../lib/api';
-  import { ui, edit, fail, timelineEnd, fit, trackAt } from '../lib/store.svelte';
+  // click map, track regions, repairs, selection and playhead drawn on top,
+  // and the tape overlays (speed, azimuth, dropouts, errors) under them.
+  import { api, type OverlayKind } from '../lib/api';
+  import { ui, edit, fail, timelineEnd, fit, trackAt, token, tokenAlpha, family, isTape } from '../lib/store.svelte';
   import { time, hz, rowFreq } from '../lib/format';
 
   let host: HTMLDivElement;
@@ -15,6 +16,23 @@
   let clickCanvas: HTMLCanvasElement;
   let reqWave = 0;
   let reqSpec = 0;
+  const STRIP = 22;
+
+  // overlays shown: toggled on, and meaningful for this medium
+  const strips = $derived.by((): OverlayKind[] => {
+    const f = family();
+    const ok: OverlayKind[] = f === 'digital' ? ['errors'] : isTape(f) || f === 'generic' ? ['speed', 'azimuth', 'dropouts'] : [];
+    return ok.filter((k) => ui.overlays[k]);
+  });
+  let stripUrls = $state<Record<string, string>>({});
+  const stripReq: Record<string, number> = {};
+  const stripTip: Record<OverlayKind, string> = {
+    speed: 'Speed curve from the wow reference: up is fast',
+    azimuth: 'Azimuth: right channel time offset against the left',
+    dropouts: 'Dropout map: repaired dips, and the ones too long to repair (bright). Hop with [ and ]',
+    errors: 'Digital error map: repaired errors, and flagged ones (bright). Hop with [ and ]',
+  };
+  const stripName: Record<OverlayKind, string> = { speed: 'Speed', azimuth: 'Azimuth', dropouts: 'Dropouts', errors: 'Errors' };
 
   const span = $derived(Math.max(1e-3, ui.t1 - ui.t0));
   const x = (t: number) => ((t - ui.t0) / span) * W;
@@ -24,7 +42,7 @@
   function layoutLanes() {
     if (!host) return;
     W = Math.max(100, host.clientWidth);
-    const h = Math.max(120, host.clientHeight - 24 - 14 - 2);
+    const h = Math.max(120, host.clientHeight - 24 - 14 - 2 - strips.length * STRIP);
     if (ui.mode === 'both') {
       waveH = Math.floor(h * 0.45);
       specH = h - waveH;
@@ -45,6 +63,7 @@
 
   $effect(() => {
     void ui.mode;
+    void strips.length;
     layoutLanes();
   });
 
@@ -56,7 +75,7 @@
   // Pictures follow the visible range, size, vertical zoom and the project.
   $effect(() => {
     const [t0, t1, w, h, vz] = [ui.t0, ui.t1, W, waveH, ui.vzoom];
-    const gen = ui.view?.layout.length + ':' + (ui.view?.analysed ?? false) + ':' + (ui.view?.stale ?? 0) + ':' + JSON.stringify(ui.view?.layout.map((l) => l.ratio));
+    const gen = ui.view?.layout.length + ':' + (ui.view?.analysed ?? false) + ':' + (ui.view?.stale ?? 0) + ':' + JSON.stringify(ui.view?.layout.map((l) => l.ratio)) + ':' + ui.themeGen;
     void gen;
     if (!ui.view || h < 10 || !ui.view.layout.length) return;
     const id = ++reqWave;
@@ -72,7 +91,7 @@
 
   $effect(() => {
     const [t0, t1, w, h] = [ui.t0, ui.t1, W, specH];
-    const gen = (ui.view?.layout.length ?? 0) + JSON.stringify(ui.view?.layout.map((l) => l.ratio));
+    const gen = (ui.view?.layout.length ?? 0) + JSON.stringify(ui.view?.layout.map((l) => l.ratio)) + ':' + ui.themeGen;
     void gen;
     if (!ui.view || h < 10 || !ui.view.layout.length) return;
     const id = ++reqSpec;
@@ -86,11 +105,35 @@
     return () => clearTimeout(timer);
   });
 
+  // overlay strips: redrawn when the analysis or the theme changes
+  $effect(() => {
+    const [t0, t1, w, kinds] = [ui.t0, ui.t1, W, strips];
+    const gen = JSON.stringify(ui.view?.project.sources.map((s) => [s.fx.analysis?.speed_curve, s.fx.analysis?.azimuth_curve, s.fx.analysis?.dropout_map, s.fx.analysis?.error_map]))
+      + ':' + (ui.view?.events.length ?? 0) + ':' + JSON.stringify(ui.view?.layout.map((l) => l.ratio)) + ':' + ui.themeGen;
+    void gen;
+    if (!ui.view || !ui.view.layout.length || !kinds.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const timer = setTimeout(() => {
+      for (const k of kinds) {
+        const id = (stripReq[k] = (stripReq[k] ?? 0) + 1);
+        api.tileOverlay(t0, t1, Math.round(w * dpr), Math.round(STRIP * dpr), k)
+          .then((buf) => {
+            if (id !== stripReq[k]) return;
+            const old = stripUrls[k];
+            stripUrls = { ...stripUrls, [k]: toUrl(buf, old ?? '') };
+          })
+          .catch(fail);
+      }
+    }, 60);
+    return () => clearTimeout(timer);
+  });
+
   // ruler
   $effect(() => {
     const c = rulerCanvas;
     if (!c) return;
     const [t0, t1, w] = [ui.t0, ui.t1, W];
+    void ui.themeGen;
     const dpr = window.devicePixelRatio || 1;
     c.width = w * dpr;
     c.height = 24 * dpr;
@@ -100,8 +143,8 @@
     const steps = [0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
     const per = (t1 - t0) / (w / 90);
     const st = steps.find((s) => s >= per) ?? 600;
-    g.fillStyle = '#8fa39d';
-    g.strokeStyle = '#2a3d39';
+    g.fillStyle = token('--muted');
+    g.strokeStyle = token('--border');
     g.font = '10.5px ' + getComputedStyle(document.body).getPropertyValue('--mono');
     for (let t = Math.ceil(t0 / st) * st; t <= t1; t += st) {
       const px = ((t - t0) / (t1 - t0)) * w;
@@ -118,6 +161,8 @@
     const c = clickCanvas;
     if (!c) return;
     const [t0, t1, w, clicks] = [ui.t0, ui.t1, W, ui.clicks];
+    void ui.themeGen;
+    const hot = tokenAlpha('--attention', 0.95);
     const dpr = window.devicePixelRatio || 1;
     c.width = w * dpr;
     c.height = 14 * dpr;
@@ -127,9 +172,9 @@
     for (const [t, sz, crackle] of clicks) {
       if (t < t0 || t > t1) continue;
       const px = Math.round(((t - t0) / (t1 - t0)) * w) + 0.5;
-      // brighter = harder repair; copper only for repairs near full scale
+      // brighter = harder repair; the attention color only for repairs near full scale
       const k = Math.min(1, Math.max(0, (sz + 50) / 50));
-      g.strokeStyle = sz > -3 ? 'rgba(212,136,74,0.95)' : `rgba(95,184,165,${0.2 + k * 0.8})`;
+      g.strokeStyle = sz > -3 ? hot : tokenAlpha('--accent', 0.2 + k * 0.8);
       g.beginPath();
       g.moveTo(px, crackle ? 9 : 2);
       g.lineTo(px, 14);
@@ -306,7 +351,7 @@
 
 <div class="tl" bind:this={host} onwheel={wheel} onpointermove={move} onpointerup={up} role="application" aria-label="Timeline">
   <canvas class="ruler" bind:this={rulerCanvas} style="width:{W}px;height:24px" onpointerdown={(e) => down(e, 'ruler')} title="Drag here to scrub"></canvas>
-  <canvas class="clicks" bind:this={clickCanvas} style="width:{W}px;height:14px" title="Click map: one tick per repaired click, brighter for harder repairs (copper: near full scale). Short ticks are crackle. Jump with [ and ]"></canvas>
+  <canvas class="clicks" bind:this={clickCanvas} style="width:{W}px;height:14px" title="Click map: one tick per repaired click, brighter for harder repairs (the warning color: near full scale). Short ticks are crackle. Jump with [ and ]"></canvas>
 
   <div class="lanes">
     {#if waveH > 0}
@@ -360,12 +405,23 @@
             <span class="mono small sellab">{time(ui.selection.b - ui.selection.a, true)}</span>
           </div>
         {/if}
+        {#each ui.view.events as e (e.kind + e.g)}
+          {#if e.kind === 'programchange' && e.g + e.len > ui.t0 && e.g < ui.t1}
+            <div class="pc" class:span={e.spans_song} style="left:{x(e.g)}px;width:{Math.max(2, x(e.g + e.len) - x(e.g))}px" title={e.spans_song ? 'Program change inside a song' : 'Program change'}></div>
+          {/if}
+        {/each}
         {#if ui.tick.pos >= ui.t0 && ui.tick.pos <= ui.t1}
           <div class="playhead" style="left:{x(ui.tick.pos)}px"></div>
         {/if}
       {/if}
     </div>
   </div>
+  {#each strips as k (k)}
+    <div class="strip" style="height:{STRIP}px" title={stripTip[k]}>
+      {#if stripUrls[k]}<img src={stripUrls[k]} alt="" draggable="false" />{/if}
+      <span class="striplab small">{stripName[k]}</span>
+    </div>
+  {/each}
   {#if ui.view && !ui.view.layout.length}
     <div class="empty muted">Record a side or import audio in the Capture/Import step.</div>
   {/if}
@@ -381,18 +437,23 @@
   .over { position: absolute; inset: 0; pointer-events: none; }
   .side { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
   .sidelab { position: absolute; bottom: 2px; left: 4px; color: var(--muted); }
-  .trk { position: absolute; top: 0; height: 18px; background: rgba(95, 184, 165, 0.07); border-bottom: 1px solid var(--verdigris-dim); overflow: hidden; }
-  .trk.sel { background: rgba(95, 184, 165, 0.18); }
+  .trk { position: absolute; top: 0; height: 18px; background: var(--accent-faint); border-bottom: 1px solid var(--accent-dim); overflow: hidden; }
+  .trk.sel { background: var(--accent-strong); }
   .trklab { padding: 1px 5px; color: var(--text); white-space: nowrap; }
-  .edge { position: absolute; top: 0; bottom: 0; width: 1px; background: rgba(95, 184, 165, 0.35); }
-  .edge.hot { background: var(--verdigris); width: 2px; margin-left: -1px; }
-  .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--verdigris); box-shadow: 0 0 0 0.5px rgba(95,184,165,.4); }
-  .sel { position: absolute; top: 0; bottom: 0; background: rgba(230, 236, 233, 0.08); border-left: 1px solid var(--muted); border-right: 1px solid var(--muted); }
-  .sel.loop { background: rgba(95, 184, 165, 0.12); border-color: var(--verdigris); }
+  .edge { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent-line); }
+  .edge.hot { background: var(--accent); width: 2px; margin-left: -1px; }
+  .playhead { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--accent); box-shadow: 0 0 0 0.5px var(--accent-glow); }
+  .sel { position: absolute; top: 0; bottom: 0; background: var(--text-wash); border-left: 1px solid var(--muted); border-right: 1px solid var(--muted); }
+  .sel.loop { background: var(--accent-soft); border-color: var(--accent); }
   .sel.band { border: 1px solid var(--text); bottom: auto; }
   .sellab, .bandlab { position: absolute; top: 20px; left: 4px; color: var(--text); white-space: nowrap; }
   .bandlab { top: 2px; }
-  .repair { position: absolute; top: 18px; bottom: 0; background: rgba(95, 184, 165, 0.14); border: 1px dashed var(--verdigris-dim); }
+  .repair { position: absolute; top: 18px; bottom: 0; background: var(--accent-tint); border: 1px dashed var(--accent-dim); }
+  .pc { position: absolute; top: 18px; bottom: 0; border-left: 1px dashed var(--muted); border-right: 1px dashed var(--muted); }
+  .pc.span { border-color: var(--attention); }
+  .strip { position: relative; border-top: 1px solid var(--border); flex: none; }
+  .strip img { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .striplab { position: absolute; top: 3px; left: 4px; color: var(--muted); pointer-events: none; }
   .repair.band { bottom: auto; }
   .spec .repair { pointer-events: none; }
   .empty { position: absolute; inset: 60px 0 0 0; display: grid; place-items: center; pointer-events: none; }

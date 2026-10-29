@@ -3,7 +3,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { ask } from '@tauri-apps/plugin-dialog';
   import { api, type Tick } from './lib/api';
-  import { ui, fail, toast, setView, fit, flushNow, run, selectedTrack } from './lib/store.svelte';
+  import { ui, fail, toast, setView, fit, flushNow, run, selectedTrack, applyTheme, loadMedia, family, isTape } from './lib/store.svelte';
   import * as act from './lib/actions';
   import Timeline from './components/Timeline.svelte';
   import TrackList from './components/TrackList.svelte';
@@ -19,14 +19,30 @@
   import LookupDialog from './dialogs/LookupDialog.svelte';
   import BatchDialog from './dialogs/BatchDialog.svelte';
   import SmallDialogs from './dialogs/SmallDialogs.svelte';
+  import MediumDialog from './dialogs/MediumDialog.svelte';
+  import SettingsDialog from './dialogs/SettingsDialog.svelte';
+  import type { OverlayKind } from './lib/api';
 
   const steps = ['Capture/Import', 'Split', 'Clean', 'Level', 'Export'];
   let timeline: Timeline | undefined = $state();
   const hasProject = $derived(!!ui.view?.dir);
+  const fam = $derived(family());
+  // overlays that mean something for this medium
+  const overlayChoices = $derived.by((): [OverlayKind, string, string][] => {
+    if (fam === 'digital') return [['errors', 'Errors', 'Digital errors: repaired runs, and longer ones flagged (bright)']];
+    if (isTape(fam) || fam === 'generic')
+      return [
+        ['speed', 'Speed', 'Speed curve from the wow reference: up is fast. Needs Analyze with Wow on.'],
+        ['azimuth', 'Azimuth', 'Right channel time offset against the left, over time. Needs Analyze with Azimuth on.'],
+        ['dropouts', 'Dropouts', 'Dropout map: repaired dips, and ones too long to repair (bright)'],
+      ];
+    return [];
+  });
 
   // startup and backend events
   $effect(() => {
-    api.appInfo().then((i) => (ui.info = i)).catch(fail);
+    api.appInfo().then((i) => { ui.info = i; applyTheme(i.settings.theme); }).catch(fail);
+    loadMedia();
     api.projectGet().then((v) => { if (v.dir) setView(v); }).catch(fail);
     const offs: Promise<() => void>[] = [
       listen<Tick>('tick', (e) => {
@@ -89,6 +105,7 @@
     }
     if (ctrl && k.toLowerCase() === 'o') { act.openProject(); return handled(); }
     if (ctrl && k.toLowerCase() === 'n') { act.newProject(); return handled(); }
+    if (ctrl && k === ',') { ui.dialog = 'settings'; return handled(); }
     if (!hasProject) return;
 
     if (ctrl) {
@@ -98,7 +115,10 @@
         case 's': act.save(); return handled();
         case 'e': act.openExport(); return handled();
         case 'b': ui.dialog = 'batch'; return handled();
-        case 'l': ui.dialog = 'lookup'; return handled();
+        case 'l':
+          if (ui.view?.project.export.kind !== 'album') { toast('Tracklist lookup is for albums. Set the project kind to Album in the Export step to use it.'); return handled(); }
+          ui.dialog = 'lookup'; return handled();
+        case 'm': ui.dialog = 'medium'; return handled();
         case 'i': e.shiftKey ? act.importFolder() : act.importFiles(); return handled();
         case 'r': ui.step = 0; ui.captureCmd = 'record'; return handled();
         case 'enter': act.analyze(true); return handled();
@@ -156,10 +176,12 @@
       {/each}
       <span class="grow"></span>
       <div class="row tools">
+        <button class="medium" onclick={() => (ui.dialog = 'medium')} title="The medium this project is: sets the stages, capture, splitting and export (Ctrl+M)">{ui.view?.project.medium.preset.name ?? 'Medium'}</button>
         <button class="ghost" disabled={!ui.view?.can_undo} onclick={act.undo} title="Undo (Ctrl+Z)">Undo</button>
         <button class="ghost" disabled={!ui.view?.can_redo} onclick={act.redo} title="Redo (Ctrl+Shift+Z)">Redo</button>
         <button class="ghost" onclick={act.save} title="Save the project (Ctrl+S). It also autosaves every 30 seconds.">{ui.view?.dirty ? 'Save *' : 'Saved'}</button>
         <button class="ghost" onclick={() => (ui.dialog = 'help')} title="Keyboard shortcuts (?)">Keys</button>
+        <button class="ghost" onclick={() => (ui.dialog = 'settings')} title="Theme, deck profiles and library folder (Ctrl+,)">Settings</button>
         <button class="ghost" onclick={act.newProject} title="Close this project and start or open another (Ctrl+N)">Projects</button>
       </div>
     </nav>
@@ -174,6 +196,13 @@
             <button class:on={ui.mode === 'spec'} onclick={() => (ui.mode = 'spec')} title="Spectrogram only: clicks show as vertical lines, hum as a flat horizontal one">Spectrogram</button>
             <button class:on={ui.mode === 'both'} onclick={() => (ui.mode = 'both')} title="Both, stacked">Both</button>
           </div>
+          {#if overlayChoices.length}
+            <div class="row seg">
+              {#each overlayChoices as [k, lab, tip]}
+                <button class:on={ui.overlays[k]} onclick={() => (ui.overlays[k] = !ui.overlays[k])} title={tip}>{lab}</button>
+              {/each}
+            </div>
+          {/if}
           <div class="row seg">
             <button class="ghost" onclick={() => timeline?.zoom(2)} title="Zoom out (-)">-</button>
             <button class="ghost" onclick={() => timeline?.zoom(0.5)} title="Zoom in (+)">+</button>
@@ -207,6 +236,8 @@
 {:else if ui.dialog === 'folder'}<FolderDialog />
 {:else if ui.dialog === 'lookup'}<LookupDialog />
 {:else if ui.dialog === 'batch'}<BatchDialog />
+{:else if ui.dialog === 'medium' || ui.dialog === 'medium-save'}<MediumDialog />
+{:else if ui.dialog === 'settings'}<SettingsDialog />
 {:else}<SmallDialogs />{/if}
 
 <div class="toasts">
@@ -217,7 +248,8 @@
   .shell { height: 100%; display: flex; flex-direction: column; }
   .steps { display: flex; gap: 6px; padding: 8px 8px 0; align-items: center; }
   .step { flex: 0 1 170px; padding: 7px 10px; font-weight: 500; background: var(--surface); }
-  .step.active { border-color: var(--verdigris); color: var(--verdigris); background: rgba(95, 184, 165, 0.08); }
+  .step.active { border-color: var(--accent); color: var(--accent); background: var(--accent-wash); }
+  .medium { font-size: 12px; border-color: var(--accent-dim); color: var(--accent); }
   .tools button { font-size: 12px; }
   .main { flex: 1; min-height: 0; display: grid; grid-template-columns: 270px 1fr 340px; gap: 8px; padding: 8px; }
   .left { min-height: 0; overflow: hidden; }
@@ -227,7 +259,7 @@
   .seg { gap: 2px; }
   .seg button { padding: 3px 8px; font-size: 12px; }
   .tlbody { flex: 1; min-height: 0; }
-  .job { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); width: 420px; padding: 10px 12px; z-index: 40; box-shadow: 0 10px 30px rgba(0,0,0,.4); }
+  .job { position: fixed; top: 56px; left: 50%; transform: translateX(-50%); width: 420px; padding: 10px 12px; z-index: 40; box-shadow: 0 10px 30px var(--drop); }
   .bar { height: 5px; background: var(--bg); border-radius: 3px; margin-top: 6px; overflow: hidden; }
-  .fill { height: 100%; background: var(--verdigris); transition: width .2s; }
+  .fill { height: 100%; background: var(--accent); transition: width .2s; }
 </style>

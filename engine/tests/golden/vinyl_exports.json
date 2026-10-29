@@ -1,0 +1,944 @@
+[
+  {
+    "args": [
+      "{repo}/tests/clicks_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/01. Track 1.flac",
+        "pcm_sha256": "27d436f3e3f99b93d0adfe90ac60f9d55deba03c990207fa1ad926c06d4e4c06",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep-default",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/Raw/Side A.wav",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 10.5 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 12, crackle ticks: 3",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.10 dBTP -> -11.55 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "clean-modern",
+      "{repo}/tests/clicks_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/01. Track 1.flac",
+        "pcm_sha256": "d2f539f5c7a9f4fb13026a6bebf1b8f5e9d5e3c6db2330c4c7b5440ee16957e5",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep-clean-modern",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/Raw/Side A.wav",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 14.0 dB/1.5 ms, denoise 4.0 dB, smoothing 50%",
+      "  Clicks repaired: 12, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.08 dBTP -> -11.55 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "light-wear",
+      "{repo}/tests/clicks_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/01. Track 1.flac",
+        "pcm_sha256": "4ee6bb3f4a784b44e1f1c4e08c7e50fcbb6f882f9030f89743c9925dca9ca84e",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep-light-wear",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/Raw/Side A.wav",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 12, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.10 dBTP -> -11.55 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "worn-70s",
+      "{repo}/tests/clicks_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/01. Track 1.flac",
+        "pcm_sha256": "f15e4d9b2dcb50840bf6c6bb15610796245ddbc5b81c44627977f75a5aad760c",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep-worn-70s",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep/Raw/Side A.wav",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 25 Hz 36 dB/oct, declick 11.5 dB/3.0 ms, decrackle 9.5 dB, denoise 9.0 dB, smoothing 65%, EQ low +0.0 dB high +1.5 dB, 0 bands",
+      "  Clicks repaired: 13, crackle ticks: 32",
+      "  Noise floor: -29.5 -> -29.7 dBFS (0.2 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -17.97 dBTP -> -11.43 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "{repo}/tests/clicks_sweep_clean.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/01. Track 1.flac",
+        "pcm_sha256": "50fddd36645170c664a7d9911b9c48c1db673a5c98c58e5f38ff9ad68ea8369a",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep_clean-default",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/Raw/Side A.wav",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 10.5 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 22, crackle ticks: 98",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.40 dBTP -> -11.86 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "clean-modern",
+      "{repo}/tests/clicks_sweep_clean.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/01. Track 1.flac",
+        "pcm_sha256": "7052119d655b29a9f7e7e1f2b66d8fd9f655f7857e22e7313aad8fe243923619",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep_clean-clean-modern",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/Raw/Side A.wav",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 14.0 dB/1.5 ms, denoise 4.0 dB, smoothing 50%",
+      "  Clicks repaired: 13, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.0 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.40 dBTP -> -11.87 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "light-wear",
+      "{repo}/tests/clicks_sweep_clean.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/01. Track 1.flac",
+        "pcm_sha256": "baed8036d76b7b8007659cf2a312618e7a08d8fdcf30c3958de8af1306a29321",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep_clean-light-wear",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/Raw/Side A.wav",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 22, crackle ticks: 77",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.40 dBTP -> -11.86 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "worn-70s",
+      "{repo}/tests/clicks_sweep_clean.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/01. Track 1.flac",
+        "pcm_sha256": "16112d1b5aaa275251d77e9700cf271d093406eb42cd409468cef1d13e109b62",
+        "tags": [
+          [
+            "ALBUM",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "clicks_sweep_clean-worn-70s",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - clicks_sweep_clean/Raw/Side A.wav",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 25 Hz 36 dB/oct, declick 11.5 dB/3.0 ms, decrackle 9.5 dB, denoise 9.0 dB, smoothing 65%, EQ low +0.0 dB high +1.5 dB, 0 bands",
+      "  Clicks repaired: 42, crackle ticks: 133",
+      "  Noise floor: -29.5 -> -29.7 dBFS (0.2 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.8 LU",
+      "  True peak: -18.40 dBTP -> -11.86 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "{repo}/tests/hum_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/01. Track 1.flac",
+        "pcm_sha256": "5a2ee2078ad9f02334a3a9cde79fcce6ebd03ac68ca33cd9a054ce39a5a2d259",
+        "tags": [
+          [
+            "ALBUM",
+            "hum_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "hum_sweep-default",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/Raw/Side A.wav",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.6 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, hum 60 Hz x4 1 Hz wide, declick 13.0 dB/2.0 ms, decrackle 10.5 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 0, crackle ticks: 3",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.6 LUFS -> -14.0 LUFS (gain +6.6 dB), LRA 1.8 LU",
+      "  True peak: -16.99 dBTP -> -10.42 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "clean-modern",
+      "{repo}/tests/hum_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/01. Track 1.flac",
+        "pcm_sha256": "4aa4c91e81e4bbd4203e02fd9eae88ddfa8f9c37505fa56ea761083e108534b0",
+        "tags": [
+          [
+            "ALBUM",
+            "hum_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "hum_sweep-clean-modern",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/Raw/Side A.wav",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.6 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, hum 60 Hz x4 1 Hz wide, declick 14.0 dB/1.5 ms, denoise 4.0 dB, smoothing 50%",
+      "  Clicks repaired: 0, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.6 LUFS -> -14.0 LUFS (gain +6.6 dB), LRA 1.9 LU",
+      "  True peak: -16.98 dBTP -> -10.42 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "light-wear",
+      "{repo}/tests/hum_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/01. Track 1.flac",
+        "pcm_sha256": "e667a2821a16a9b45c98d69a2ddb04701ca960976a01889df4d2b9f6e48d8933",
+        "tags": [
+          [
+            "ALBUM",
+            "hum_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "hum_sweep-light-wear",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/Raw/Side A.wav",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.6 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, hum 60 Hz x4 1 Hz wide, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 0, crackle ticks: 1",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.6 LUFS -> -14.0 LUFS (gain +6.6 dB), LRA 1.8 LU",
+      "  True peak: -16.99 dBTP -> -10.42 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "worn-70s",
+      "{repo}/tests/hum_sweep.wav"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/01. Track 1.flac",
+        "pcm_sha256": "f28c569ed00fdb4a3da9306865c10f1154d8e6c06e48e17ac4b74598a9fdee32",
+        "tags": [
+          [
+            "ALBUM",
+            "hum_sweep"
+          ],
+          [
+            "TITLE",
+            "Track 1"
+          ],
+          [
+            "TRACKNUMBER",
+            "1"
+          ],
+          [
+            "TRACKTOTAL",
+            "1"
+          ]
+        ]
+      }
+    ],
+    "name": "hum_sweep-worn-70s",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - hum_sweep/Raw/Side A.wav",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.6 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: 01. Track 1.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 25 Hz 36 dB/oct, hum 60 Hz x4 1 Hz wide, declick 11.5 dB/3.0 ms, decrackle 9.5 dB, denoise 9.0 dB, smoothing 65%, EQ low +0.0 dB high +1.5 dB, 0 bands",
+      "  Clicks repaired: 0, crackle ticks: 30",
+      "  Noise floor: -29.5 -> -29.7 dBFS (0.2 dB lower)",
+      "  Loudness: -20.6 LUFS -> -14.0 LUFS (gain +6.6 dB), LRA 1.9 LU",
+      "  True peak: -17.01 dBTP -> -10.45 dBTP, limiter at most 0.0 dB"
+    ]
+  },
+  {
+    "args": [
+      "--cleaned",
+      "{folder}"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/clicks_sweep.flac",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "clicks_sweep"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/clicks_sweep_clean.flac",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/hum_sweep.flac",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "hum_sweep"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      }
+    ],
+    "name": "folder-cleaned",
+    "raw": [],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.3 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: clicks_sweep.flac (16-bit, 48000 Hz)",
+      "  Cleaned import: passed through untouched, tags only",
+      "  File: clicks_sweep_clean.flac (16-bit, 48000 Hz)",
+      "  Cleaned import: passed through untouched, tags only",
+      "  File: hum_sweep.flac (16-bit, 48000 Hz)",
+      "  Cleaned import: passed through untouched, tags only"
+    ]
+  },
+  {
+    "args": [
+      "--preset",
+      "light-wear",
+      "{folder}"
+    ],
+    "flac": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/clicks_sweep.flac",
+        "pcm_sha256": "8404c7d6b15dfb6f55eeff20c2787dec5c07d76ef14f4d100900ade6a02089bb",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "clicks_sweep"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/clicks_sweep_clean.flac",
+        "pcm_sha256": "d5a9c7bc9565a6c113efa1edc7a86368cbd55a4b34dcca9587b0253b849f232a",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "clicks_sweep_clean"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/hum_sweep.flac",
+        "pcm_sha256": "987b9e1d5c8d5095305014f062318be1edf13d2ae461012c8d53aca16edd58f5",
+        "tags": [
+          [
+            "DISCNUMBER",
+            "1"
+          ],
+          [
+            "TITLE",
+            "hum_sweep"
+          ],
+          [
+            "TRACKTOTAL",
+            "3"
+          ]
+        ]
+      }
+    ],
+    "name": "folder-raw-light-wear",
+    "raw": [
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/Raw/clicks_sweep.wav",
+        "pcm_sha256": "9ad3ee849d1f1749edbc0ec6129caed57d09c5f7424d0ab606e56ca9a085c3d9"
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/Raw/clicks_sweep_clean.wav",
+        "pcm_sha256": "87f45b5c7e5dfe76c12881460c06837680c55f1dc396cbf9233e0057953fb899"
+      },
+      {
+        "format": {
+          "bits": 16,
+          "channels": 2,
+          "frames": 192000,
+          "rate": 48000
+        },
+        "path": "Unknown Artist - Unknown Album/Raw/hum_sweep.wav",
+        "pcm_sha256": "efff5103e45312620a1cbdd3603aa2d60e06a6c0cb949aca785410eaf87c211b"
+      }
+    ],
+    "report": [
+      "Leveling: track mode, target -14.0 LUFS, ceiling -1.0 dBTP, limiter cap 3.0 dB, album loudness -20.5 LUFS (duration weighted)",
+      "Output: FLAC, 16-bit with TPDF dither",
+      "  File: clicks_sweep.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 12, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.9 LU",
+      "  True peak: -18.10 dBTP -> -11.65 dBTP, limiter at most 0.0 dB",
+      "  File: clicks_sweep_clean.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 22, crackle ticks: 77",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.9 LU",
+      "  True peak: -18.40 dBTP -> -11.95 dBTP, limiter at most 0.0 dB",
+      "  File: hum_sweep.flac (16-bit, 48000 Hz)",
+      "  Chain: rumble 20 Hz 24 dB/oct, declick 13.0 dB/2.0 ms, decrackle 11.0 dB, denoise 6.0 dB, smoothing 50%",
+      "  Clicks repaired: 0, crackle ticks: 0",
+      "  Noise floor: -29.5 -> -29.6 dBFS (0.1 dB lower)",
+      "  Loudness: -20.5 LUFS -> -14.0 LUFS (gain +6.5 dB), LRA 1.9 LU",
+      "  True peak: -18.14 dBTP -> -11.69 dBTP, limiter at most 0.0 dB"
+    ]
+  }
+]

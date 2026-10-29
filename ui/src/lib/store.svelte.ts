@@ -1,7 +1,7 @@
 // Shared UI state (Svelte 5 runes).
-import { api, type AppInfo, type Chain, type ExportResult, type Preset, type Project, type ProjectView, type Tick, type Track } from './api';
+import { api, type AppInfo, type Chain, type ExportResult, type Family, type MediaInfo, type MediumPreset, type OverlayKind, type Preset, type Project, type ProjectView, type Tick, type Track } from './api';
 
-export type Dialog = null | 'export' | 'folder' | 'lookup' | 'batch' | 'help' | 'new' | 'report' | 'preset-save';
+export type Dialog = null | 'export' | 'folder' | 'lookup' | 'batch' | 'help' | 'new' | 'report' | 'preset-save' | 'medium' | 'settings' | 'medium-save';
 
 export interface Selection { a: number; b: number; band: [number, number] | null }
 
@@ -33,7 +33,60 @@ export const ui = $state({
   lastExport: null as ExportResult | null,
   scope: 'all' as 'all' | 'track',
   captureCmd: null as null | 'record' | 'check' | 'stop',
+  theme: 'verdigris',
+  /** Bumped on every theme switch, so the pictures drawn in Rust redraw. */
+  themeGen: 0,
+  overlays: { speed: false, azimuth: false, dropouts: true, errors: true } as Record<OverlayKind, boolean>,
+  media: null as MediaInfo | null,
 });
+
+export const THEMES: [string, string][] = [
+  ['verdigris', 'Verdigris'],
+  ['light', 'Light'],
+  ['dark', 'Dark'],
+  ['kawaii-light', 'Kawaii Light'],
+  ['kawaii-dark', 'Kawaii Dark'],
+];
+
+/** Restyle the window. The tile palette is switched in Rust by set_theme. */
+export function applyTheme(theme: string) {
+  if (!THEMES.some(([id]) => id === theme)) theme = 'verdigris';
+  ui.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  ui.themeGen++;
+}
+
+/** A token's value from the current theme. */
+export function token(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/** A #rrggbb token with an alpha, for canvas drawing. */
+export function tokenAlpha(name: string, a: number): string {
+  const v = token(name);
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(v);
+  if (!m) return v;
+  return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${a})`;
+}
+
+export async function loadMedia() {
+  try {
+    ui.media = await api.mediaInfo();
+  } catch (e) {
+    fail(e);
+  }
+}
+
+/** The open project's medium. */
+export function medium(): MediumPreset | null {
+  return ui.view?.project.medium.preset ?? null;
+}
+
+export function family(): Family {
+  return ui.view?.project.medium.preset.family ?? 'vinyl';
+}
+
+export const isTape = (f: Family) => f === 'cassette' || f === 'cartridge' || f === 'reel' || f === 'video';
 
 let toastId = 0;
 export function toast(text: string, err = false) {

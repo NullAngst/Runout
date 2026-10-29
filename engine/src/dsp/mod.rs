@@ -5,3 +5,8 @@ pub mod limiter;
 pub mod loudness;
 pub mod lpc;
 pub mod resample;
+pub mod tape_eq;
+pub mod nr;
+pub mod dropout;
+pub mod azimuth;
+pub mod wow;

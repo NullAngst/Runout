@@ -20,3 +20,7 @@ realfft = "3"
 ebur128 = "0.1"
 rayon = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+memmap2 = "0.9"
+
+[dev-dependencies]
+sha2 = "0.10"

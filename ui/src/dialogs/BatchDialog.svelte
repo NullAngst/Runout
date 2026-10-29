@@ -7,7 +7,10 @@
   let folders = $state<{ path: string; on: boolean }[]>([]);
   let preset = $state('');
   let cleaned = $state(false);
-  let root = $state(ui.view?.project.export.root ?? '~/Music/Runout/Artists');
+  // svelte-ignore state_referenced_locally
+  let root = $state(ui.view?.project.export.root ?? ui.info?.settings.library_root ?? '~/Music/Runout');
+  // svelte-ignore state_referenced_locally
+  let medium = $state(ui.view?.project.medium.id ?? ui.info?.settings.last_medium ?? 'vinyl-lp');
   let bits = $state(16);
 
   $effect(() => {
@@ -28,7 +31,7 @@
     const sel = folders.filter((f) => f.on).map((f) => f.path);
     try {
       ui.dialog = null;
-      await api.batchRun(sel, preset || null, { cleaned, export_root: root, bit_depth: bits, target_lufs: null, ceiling_dbtp: null, album_mode: false, no_level: false });
+      await api.batchRun(sel, preset || null, { cleaned, export_root: root, bit_depth: bits, target_lufs: null, ceiling_dbtp: null, album_mode: false, no_level: false }, medium);
     } catch (e) { fail(e); }
   }
 </script>
@@ -45,10 +48,14 @@
             <button class="ghost" onclick={() => folders.splice(i, 1)}>Remove</button></label>
         {/each}
       </div>
+      <label class="row" title="What the files were captured from: sets the stages and the MEDIA tag"><span style="width:90px">Medium</span>
+        <select class="grow" bind:value={medium}>
+          {#each ui.media?.media ?? [] as m (m.id)}<option value={m.id}>{m.name}</option>{/each}
+        </select></label>
       <label class="row"><span style="width:90px">Preset</span>
         <select class="grow" bind:value={preset}>
           <option value="">Default settings</option>
-          {#each ui.presets as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+          {#each ui.presets.filter((p) => (p.family ?? 'vinyl') === (ui.media?.media.find((m) => m.id === medium)?.family ?? 'vinyl')) as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
         </select></label>
       <div class="row"><span style="width:90px" class="muted">Files are</span>
         <button class:on={!cleaned} onclick={() => (cleaned = false)}>Raw</button>

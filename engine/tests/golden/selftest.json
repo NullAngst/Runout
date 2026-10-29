@@ -1,0 +1,48 @@
+{
+  "checks": [
+    [
+      "clicks repaired",
+      "40 of 40"
+    ],
+    [
+      "click residual, median",
+      "0.0064"
+    ],
+    [
+      "click residual, worst",
+      "0.0099"
+    ],
+    [
+      "60 Hz hum reduction",
+      "52.9 dB"
+    ],
+    [
+      "integrated loudness",
+      "-14.00 LUFS (target -14.0)"
+    ],
+    [
+      "true peak",
+      "-10.10 dBTP (ceiling -1.0)"
+    ],
+    [
+      "preview block vs export",
+      "max diff 0.00005"
+    ],
+    [
+      "limiter cap respected",
+      "3.00 dB reduction, 8.5 dB short"
+    ],
+    [
+      "true peak, hard material",
+      "-1.00 dBTP"
+    ]
+  ],
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "threads": 2,
+  "throughput_runs": [
+    19.0,
+    19.0,
+    19.0
+  ],
+  "throughput_x_median": 19.0
+}

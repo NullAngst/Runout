@@ -11,7 +11,15 @@
       return sa - sb || a.start_s - b.start_s;
     }),
   );
-  const blank = $derived(p.tracks.filter((t) => !t.title.trim()).length);
+  // recordings may leave titles blank: they become Part 1, Part 2
+  const blank = $derived(p.export.kind === 'recording' ? 0 : p.tracks.filter((t) => !t.title.trim()).length);
+  const fields = $derived(
+    p.export.kind === 'album'
+      ? [['artist', 'Artist'], ['album', 'Album'], ['album_artist', 'Album artist'], ['year', 'Year'], ['genre', 'Genre']]
+      : p.export.kind === 'mixtape'
+        ? [['album', 'Tape title'], ['year', 'Year'], ['genre', 'Genre']]
+        : [['album', 'Title'], ['artist', 'Who'], ['year', 'Date'], ['genre', 'Genre']],
+  );
 
   async function go() {
     await flushNow();
@@ -30,7 +38,7 @@
     <header><h2 class="grow">Export</h2><span class="muted small">{p.tracks.length} tracks, {p.export.bit_depth}-bit FLAC</span></header>
     <div class="body col">
       <div class="albumgrid">
-        {#each [['artist', 'Artist'], ['album', 'Album'], ['album_artist', 'Album artist'], ['year', 'Year'], ['genre', 'Genre']] as [k, lab]}
+        {#each fields as [k, lab]}
           <label class="col"><span>{lab}</span><input type="text" bind:value={(p.album as any)[k]} /></label>
         {/each}
       </div>
@@ -41,7 +49,7 @@
             <tr>
               <td><input type="number" class="numin" value={t.number ?? ''} min="1"
                 oninput={(e) => { const v = parseInt((e.target as HTMLInputElement).value); t.number = isFinite(v) ? v : null; }} /></td>
-              <td><input type="text" class="w" class:missing={!t.title.trim()} bind:value={t.title} placeholder="Title" /></td>
+              <td><input type="text" class="w" class:missing={!t.title.trim() && p.export.kind !== 'recording'} bind:value={t.title} placeholder={p.export.kind === 'recording' ? `Part ${t.number ?? ''}` : 'Title'} /></td>
               <td>
                 {#if t.file_name != null}
                   <input type="text" class="w mono" bind:value={t.file_name} title="Imported files keep their name unless you change it" />
@@ -57,8 +65,8 @@
       </table>
     </div>
     <footer>
-      {#if blank}<span class="copper small grow">{blank} track{blank > 1 ? 's' : ''} still need a title.</span>{/if}
-      <button onclick={() => { ui.dialogData = { fromExport: true }; ui.dialog = 'lookup'; }}>Look up tracklist</button>
+      {#if blank}<span class="attention small grow">{blank} track{blank > 1 ? 's' : ''} still need a title.</span>{/if}
+      {#if p.export.kind === 'album'}<button onclick={() => { ui.dialogData = { fromExport: true }; ui.dialog = 'lookup'; }}>Look up tracklist</button>{/if}
       <button onclick={() => (ui.dialog = null)}>Cancel</button>
       <button class="primary" disabled={blank > 0} onclick={go}>Export</button>
     </footer>
@@ -70,6 +78,6 @@
   .albumgrid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
   .numin { width: 52px; }
   .w { width: 100%; }
-  .missing { border-color: var(--copper); }
+  .missing { border-color: var(--attention); }
   td { vertical-align: middle; }
 </style>

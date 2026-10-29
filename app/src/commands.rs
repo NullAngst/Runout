@@ -7,7 +7,8 @@ use crate::player::Cmd;
 use crate::prefs::projects_root;
 use crate::state::{progress, App, Inner, ProjectView};
 use runout_engine::audio::{self, SourceAudio};
-use runout_engine::chain::{Chain, Repair};
+use runout_engine::chain::{Chain, ChannelModeKind, Repair};
+use runout_engine::media::{self, CapturePath, DeckProfile, Family, MediumPreset};
 use runout_engine::project::{self, ImportItem, Project, SourceKind, AUTOSAVE_FILE, PROJECT_FILE};
 use runout_engine::{auto, batch, export, ops, presets, render, tiles};
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,25 @@ pub struct AppInfo {
     recovery: Option<Recovery>,
     recent: Vec<String>,
     music_root: String,
+    settings: Settings,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Settings {
+    pub theme: String,
+    pub last_medium: String,
+    pub deck_by_family: std::collections::BTreeMap<String, String>,
+    pub library_root: String,
+}
+
+fn settings_of(st: &App) -> Settings {
+    let p = st.prefs.lock().unwrap();
+    Settings {
+        theme: p.theme.clone(),
+        last_medium: p.last_medium.clone().unwrap_or_else(|| "vinyl-lp".into()),
+        deck_by_family: p.deck_by_family.clone(),
+        library_root: p.library_root.clone().unwrap_or_else(|| project::DEFAULT_ROOT.into()),
+    }
 }
 
 #[derive(Serialize)]
@@ -70,6 +90,7 @@ pub fn app_info(st: State<'_, App>) -> AppInfo {
         recovery: rec,
         recent: st.prefs.lock().unwrap().recent.clone(),
         music_root: format!("{home}/Music"),
+        settings: settings_of(&st),
     }
 }
 
@@ -94,7 +115,7 @@ pub fn mark_closed(st: &App) {
 }
 
 #[tauri::command]
-pub fn project_new(st: State<'_, App>, name: String, parent: Option<String>) -> R<ProjectView> {
+pub fn project_new(st: State<'_, App>, name: String, parent: Option<String>, medium: Option<String>, condition: Option<String>, deck: Option<String>) -> R<ProjectView> {
     if st.capture.lock().unwrap().is_some() {
         return Err("stop the capture first".into());
     }
@@ -105,7 +126,29 @@ pub fn project_new(st: State<'_, App>, name: String, parent: Option<String>) -> 
         return Err(format!("{} already exists; open it instead", dir.display()));
     }
     std::fs::create_dir_all(dir.join("captures")).map_err(e)?;
-    let p = Project { name: name.clone(), ..Default::default() };
+    let mut p = Project { name: name.clone(), ..Default::default() };
+    let mid = medium.unwrap_or_else(|| "vinyl-lp".into());
+    let m = media::find(&mid).ok_or_else(|| format!("no medium called {mid}"))?;
+    let cond = match condition.as_deref().filter(|c| !c.is_empty()) {
+        Some(c) => Some(presets::find(c).ok_or_else(|| format!("no condition preset called {c}"))?),
+        None => m.default_condition.as_deref().and_then(presets::find),
+    };
+    let dk = deck.as_deref().filter(|d| !d.is_empty()).and_then(media::find_deck);
+    // Vinyl LP with nothing on top is today's Runout: leave the default alone.
+    if m.id != "vinyl-lp" || cond.is_some() || dk.is_some() {
+        media::apply_to_project(&mut p, &m, cond.as_ref(), dk.as_ref());
+    }
+    {
+        let mut pr = st.prefs.lock().unwrap();
+        if let Some(root) = pr.library_root.clone() {
+            p.export.root = root;
+        }
+        pr.last_medium = Some(m.id.clone());
+        if let Some(d) = &dk {
+            pr.deck_by_family.insert(format!("{:?}", m.family).to_lowercase(), d.id.clone());
+        }
+        pr.save();
+    }
     p.save(&dir).map_err(e)?;
     let mut inner = st.inner.lock().unwrap();
     reset(&mut inner, p, Some(dir.clone()));
@@ -251,13 +294,15 @@ pub fn import_files(app: AppHandle, st: State<'_, App>, paths: Vec<String>) -> R
             let mut p = inner.project.clone();
             for (path, a) in loaded {
                 let n_sides = p.sources.iter().filter(|s| s.kind != SourceKind::Folder).count();
-                let name = format!("Side {}", (b'A' + (n_sides as u8).min(25)) as char);
+                let name = p.medium.preset.side_naming.name(n_sides);
                 let sid = ops::add_source(&mut p, &path, SourceKind::File, true, &name, &a);
                 ops::auto_new_source(&mut p, sid, &a);
-                if p.sources.len() == 1 {
+                if p.sources.len() == 1 && p.split.mode == project::SplitMode::Absolute {
                     p.split.threshold_db = auto::auto_split_threshold(&a);
                 }
-                ops::split_source(&mut p, sid, &a);
+                // one track per side: nothing splits until a split button is pressed
+                ops::whole_source_track(&mut p, sid, &a);
+                tone_on_arrival(&mut p, sid, &a);
                 inner.audio.insert(sid, a);
             }
             st.commit(&mut inner, p, "Import files");
@@ -485,6 +530,82 @@ pub fn auto_stage(st: State<'_, App>, stage: String, track_id: Option<u64>) -> R
                 let c = chain_of(p, track_id);
                 c.eq = Default::default();
             }
+            "speed" => {
+                // a reference tone at the head, else the hum's mean
+                let t = auto::detect_tone(&a);
+                let err = match t.as_ref().and_then(|t| t.speed_err_pct) {
+                    Some(e) => Some(e),
+                    None => {
+                        let w = chain_of(p, track_id).wow.clone();
+                        auto::measure_wow(&a, &w).static_err_pct
+                    }
+                };
+                let s = p.source_mut(sid).ok_or("no side")?;
+                s.fx.analysis.tone = t;
+                match err {
+                    Some(e) => s.fx.speed.trim_pct = (e * 1000.0).round() / 1000.0,
+                    None => return Err("no reference tone or tape hum to measure the speed from".into()),
+                }
+            }
+            "wow" => {
+                let w = chain_of(p, track_id).wow.clone();
+                let r = auto::measure_wow(&a, &w);
+                let s = p.source_mut(sid).ok_or("no side")?;
+                s.fx.analysis.wow_note = Some(r.note.clone());
+                s.fx.analysis.wow_peak_pct = r.peak_pct;
+                s.fx.analysis.wow_weighted_pct = r.weighted_pct;
+                let ok = r.track.is_some();
+                s.fx.analysis.set_wow(sid, r.track);
+                chain_of(p, track_id).wow.enabled = ok;
+                if !ok {
+                    return Err(r.note);
+                }
+            }
+            "azimuth" => {
+                let c = auto::measure_azimuth(&a);
+                let (mean, stat) = c.as_ref().map(|c| (c.mean(), c.is_static())).unwrap_or((0.0, true));
+                p.source_mut(sid).ok_or("no side")?.fx.analysis.set_azimuth(sid, c.clone());
+                let ch = chain_of(p, track_id);
+                ch.azimuth.enabled = c.is_some();
+                ch.azimuth.mode = runout_engine::chain::AzimuthMode::Auto;
+                ch.azimuth.static_us = (mean * 10.0).round() / 10.0;
+                let _ = stat;
+            }
+            "channel_mode" => {
+                let b = auto::best_channel(&a);
+                p.source_mut(sid).ok_or("no side")?.fx.analysis.best_channel = Some(b);
+                let ch = chain_of(p, track_id);
+                ch.channel_mode.enabled = true;
+                ch.channel_mode.mode = ChannelModeKind::BestAuto;
+            }
+            "nr" => {
+                let t = auto::detect_tone(&a).ok_or("no level tone at the head of this tape: type the reference level in")?;
+                p.source_mut(sid).ok_or("no side")?.fx.analysis.tone = Some(t.clone());
+                let ch = chain_of(p, track_id);
+                ch.nr.ref_dbfs = (t.level_dbfs * 10.0).round() / 10.0;
+                ch.nr.ref_measured = true;
+            }
+            "dropout" => {
+                let d = p.medium.preset.chain.dropout.clone();
+                let ch = chain_of(p, track_id);
+                ch.dropout = d;
+                ch.dropout.enabled = true;
+            }
+            "band_limit" => {
+                let b = p.medium.preset.chain.band_limit.clone();
+                let ch = chain_of(p, track_id);
+                ch.band_limit = b;
+                ch.band_limit.enabled = true;
+            }
+            "error_repair" => {
+                let n = auto::analyze_media(p, sid, &a);
+                let ch = chain_of(p, track_id);
+                ch.error_repair.enabled = n.iter().any(|x| x.contains("digital error"));
+            }
+            "deemphasis" => {
+                let ch = chain_of(p, track_id);
+                ch.deemphasis.enabled = !ch.deemphasis.enabled;
+            }
             "level" => {
                 let c = chain_of(p, track_id);
                 c.level = Default::default();
@@ -542,10 +663,54 @@ pub fn analyze(app: AppHandle, st: State<'_, App>, all: bool) -> R<()> {
     std::thread::spawn(move || {
         let st = app_state(&app);
         let r = (|| -> R<serde_json::Value> {
-            let (p, audio) = {
+            let (mut p, audio, dir) = {
                 let inner = st.inner.lock().unwrap();
-                (inner.project.clone(), inner.audio.clone())
+                (inner.project.clone(), inner.audio.clone(), inner.dir.clone())
             };
+            // 1. what the tape and digital stages need: wow and azimuth curves,
+            // best channel, digital errors. Redone when missing, or for Analyze all.
+            let mut notes: Vec<String> = Vec::new();
+            let ids: Vec<u64> = p.sources.iter().filter(|s| s.raw || s.kind != SourceKind::Folder).map(|s| s.id).collect();
+            for (i, sid) in ids.iter().enumerate() {
+                let Some(s) = p.source(*sid) else { continue };
+                let an = &s.fx.analysis;
+                let c = &p.chain;
+                let fam = p.medium.preset.family;
+                let need = all
+                    || an.missing()
+                    || (c.wow.enabled && an.speed_curve.is_none())
+                    || (c.azimuth.enabled && an.azimuth_curve.is_none())
+                    || (c.channel_mode.enabled && c.channel_mode.mode == ChannelModeKind::BestAuto && an.best_channel.is_none())
+                    || (c.digital && an.error_map.is_none() && !c.error_repair.enabled)
+                    || (fam.is_tape() && an.tone.is_none() && an.is_empty());
+                if !need {
+                    continue;
+                }
+                if st.cancel.load(Ordering::Relaxed) {
+                    return Err("cancelled".into());
+                }
+                progress(&app, "analyze", 0.0, &format!("Measuring {} ({}/{})", s.name, i + 1, ids.len()));
+                let a = audio.get(sid).ok_or("audio not loaded")?.clone();
+                notes.extend(auto::analyze_media(&mut p, *sid, &a));
+            }
+            {
+                // the measurements go in straight away, so the track keys match below
+                let mut inner = st.inner.lock().unwrap();
+                for s in p.sources.iter() {
+                    if let Some(cur) = inner.project.source_mut(s.id) {
+                        cur.fx.analysis = s.fx.analysis.clone();
+                    }
+                }
+                if p.chain.error_repair.enabled && !inner.project.chain.error_repair.enabled {
+                    inner.project.chain.error_repair.enabled = true;
+                }
+                if let Some(d) = dir.as_ref() {
+                    let _ = inner.project.write_analysis(d);
+                }
+                inner.gen += 1;
+                st.push_ctx(&inner);
+                p = inner.project.clone();
+            }
             let order: Vec<u64> = p.ordered_tracks().iter().filter(|t| all || !p.analysis_fresh(t)).map(|t| t.id).collect();
             let n = order.len().max(1);
             let mut results = Vec::new();
@@ -569,6 +734,11 @@ pub fn analyze(app: AppHandle, st: State<'_, App>, all: bool) -> R<()> {
                         t.analysis = Some(an.analysis.clone());
                     }
                 }
+                // dropouts go on the source's map, for the overlay and [ ]
+                if !an.events.is_empty() || inner.project.source(sid).map(|s| !s.fx.analysis.dropouts().is_empty()).unwrap_or(false) {
+                    let range = (an.start, an.start + (an.peaks.len() * runout_engine::audio::PEAK_BUCKET) as i64);
+                    auto::store_dropouts(&mut inner.project, sid, &an.events, range);
+                }
                 let clicks = inner.clicks.entry(sid).or_default();
                 let (lo, hi) = (an.start, an.start + (an.peaks.len() * runout_engine::audio::PEAK_BUCKET) as i64);
                 clicks.retain(|c| c.pos < lo || c.pos >= hi);
@@ -587,10 +757,15 @@ pub fn analyze(app: AppHandle, st: State<'_, App>, all: bool) -> R<()> {
                     }
                 }
             }
+            if let Some(d) = inner.dir.clone() {
+                let _ = inner.project.write_analysis(&d);
+            }
             inner.dirty = true;
             inner.gen += 1;
             st.push_ctx(&inner);
-            Ok(serde_json::to_value(st.view(&inner)).map_err(e)?)
+            let mut v = serde_json::to_value(st.view(&inner)).map_err(e)?;
+            v["notes"] = serde_json::json!(notes);
+            Ok(v)
         })();
         st.end_job(&app, "analyze", r);
     });
@@ -637,7 +812,7 @@ pub fn preset_apply(st: State<'_, App>, id: String, track_id: Option<u64>) -> R<
 pub fn preset_save(st: State<'_, App>, name: String, track_id: Option<u64>) -> R<Vec<presets::Preset>> {
     let inner = st.inner.lock().unwrap();
     let chain = track_id.and_then(|t| inner.project.track(t).and_then(|t| t.chain.clone())).unwrap_or_else(|| inner.project.chain.clone());
-    presets::save(&name, &chain).map_err(e)?;
+    presets::save_for(&name, &chain, inner.project.medium.preset.family).map_err(e)?;
     Ok(presets::list())
 }
 
@@ -694,8 +869,9 @@ pub fn read_report(path: String) -> R<String> {
 // ---------------------------------------------------------------- lookup
 
 #[tauri::command]
-pub async fn lookup_search(artist: String, album: String) -> R<Vec<lookup::ReleaseHit>> {
-    tauri::async_runtime::spawn_blocking(move || lookup::search(&artist, &album)).await.map_err(e)?
+pub async fn lookup_search(app: AppHandle, artist: String, album: String) -> R<Vec<lookup::ReleaseHit>> {
+    let format = app_state(&app).inner.lock().unwrap().project.medium.preset.mb_format.clone();
+    tauri::async_runtime::spawn_blocking(move || lookup::search(&artist, &album, &format)).await.map_err(e)?
 }
 
 #[tauri::command]
@@ -792,21 +968,48 @@ pub fn apply_tracklist(st: State<'_, App>, tracks: Vec<TracklistEntry>, snap: bo
 pub struct Devices {
     inputs: Vec<capture::InputDevice>,
     selected: Option<String>,
+    path: CapturePath,
 }
 
+/// Inputs for the current medium's capture path.
 #[tauri::command]
 pub async fn devices(app: AppHandle) -> Devices {
-    let remembered = app_state(&app).prefs.lock().unwrap().input_device.clone();
-    let inputs = tauri::async_runtime::spawn_blocking(capture::list_inputs).await.unwrap_or_default();
+    let st = app_state(&app);
+    let path = st.inner.lock().unwrap().project.medium.preset.capture.path;
+    let remembered = {
+        let p = st.prefs.lock().unwrap();
+        if path == CapturePath::Spdif {
+            p.digital_device.clone()
+        } else {
+            p.input_device.clone()
+        }
+    };
+    let inputs = tauri::async_runtime::spawn_blocking(move || capture::list_inputs(path)).await.unwrap_or_default();
     let selected = capture::pick_default(&inputs, remembered.as_deref());
-    Devices { inputs, selected }
+    Devices { inputs, selected, path }
 }
 
 #[tauri::command]
 pub fn select_device(st: State<'_, App>, id: String) {
+    let digital = st.inner.lock().unwrap().project.medium.preset.capture.path == CapturePath::Spdif;
     let mut p = st.prefs.lock().unwrap();
-    p.input_device = Some(id);
+    if digital {
+        p.digital_device = Some(id);
+    } else {
+        p.input_device = Some(id);
+    }
     p.save();
+}
+
+fn capture_opts(st: &App, device: Option<String>, path: Option<PathBuf>, auto_stop_s: Option<f32>, max_s: Option<f32>) -> capture::Opts {
+    let m = st.inner.lock().unwrap().project.medium.preset.clone();
+    let rpms: Vec<f32> = if m.speed.unit == runout_engine::chain::SpeedUnit::Rpm { m.speed.choices.clone() } else { Vec::new() };
+    let mut spec = m.capture.clone();
+    if path.is_none() {
+        // a level check is always analog
+        spec.path = CapturePath::Analog;
+    }
+    capture::Opts { device, path, auto_stop_s, max_s, spec, rpms }
 }
 
 #[tauri::command]
@@ -815,7 +1018,11 @@ pub fn level_check(st: State<'_, App>, device: Option<String>) -> R<()> {
     if cap.is_some() {
         return Err("already capturing".into());
     }
-    *cap = Some(capture::start(capture::Opts { device, path: None, auto_stop_s: None, max_s: Some(20.0) }, "Level check".into())?);
+    if st.inner.lock().unwrap().project.medium.preset.capture.path == CapturePath::Spdif {
+        return Err("digital sources have no level check: digital levels are what they are".into());
+    }
+    let opts = capture_opts(&st, device, None, None, Some(20.0));
+    *cap = Some(capture::start(opts, "Level check".into())?);
     Ok(())
 }
 
@@ -834,7 +1041,10 @@ pub fn capture_start(st: State<'_, App>, name: String, device: Option<String>, a
         path = dir.join("captures").join(format!("{fname} ({n}).wav"));
         n += 1;
     }
-    *cap = Some(capture::start(capture::Opts { device, path: Some(path.clone()), auto_stop_s, max_s: Some(60.0 * 60.0) }, name.clone())?);
+    // long enough for a 3-hour reel
+    let opts = capture_opts(&st, device, Some(path.clone()), auto_stop_s, Some(4.0 * 60.0 * 60.0));
+    *cap = Some(capture::start(opts, name.clone())?);
+    drop(cap);
     let mut s = st.session.lock().unwrap();
     s.capture = Some(path.to_string_lossy().to_string());
     s.capture_name = Some(name);
@@ -850,6 +1060,10 @@ pub struct CaptureResult {
     pub clipped: bool,
     pub auto_stopped: bool,
     pub view: Option<ProjectView>,
+    pub bit_perfect: Option<bool>,
+    pub notes: Vec<String>,
+    pub rate: u32,
+    pub bits: u16,
 }
 
 /// Stop (or collect a finished) capture or level check.
@@ -862,16 +1076,28 @@ pub async fn capture_stop(app: AppHandle) -> R<CaptureResult> {
         let done = cap.thread.take().ok_or("capture thread missing")?.join().map_err(|_| "capture thread crashed")??;
         let seconds = done.frames as f64 / done.rate.max(1) as f64;
         let Some(path) = done.path.clone() else {
-            return Ok(CaptureResult { level_check: true, peak_db: done.peak_db, seconds, clipped: done.clipped, auto_stopped: false, view: None });
+            return Ok(CaptureResult { level_check: true, peak_db: done.peak_db, seconds, clipped: done.clipped, auto_stopped: false, view: None, bit_perfect: None, notes: done.notes, rate: done.rate, bits: done.bits });
         };
-        let view = add_capture(&st, &path, &cap.name)?;
-        Ok(CaptureResult { level_check: false, peak_db: done.peak_db, seconds, clipped: done.clipped, auto_stopped: done.auto_stopped, view: Some(view) })
+        let view = add_capture(&st, &path, &cap.name, done.emphasis == Some(true))?;
+        Ok(CaptureResult { level_check: false, peak_db: done.peak_db, seconds, clipped: done.clipped, auto_stopped: done.auto_stopped, view: Some(view), bit_perfect: done.bit_perfect, notes: done.notes, rate: done.rate, bits: done.bits })
     })
     .await
     .map_err(e)?
 }
 
-fn add_capture(st: &App, path: &Path, name: &str) -> R<ProjectView> {
+/// A tape's reference tone, looked for as soon as the side arrives so the
+/// Capture panel can show it: the first minute only, so it is quick.
+fn tone_on_arrival(p: &mut Project, sid: u64, a: &SourceAudio) {
+    let fam = p.medium.preset.family;
+    if !(fam.is_tape() || fam == Family::Generic) {
+        return;
+    }
+    if let Some(s) = p.source_mut(sid) {
+        s.fx.analysis.tone = auto::detect_tone(a);
+    }
+}
+
+fn add_capture(st: &App, path: &Path, name: &str, emphasis: bool) -> R<ProjectView> {
     let a = Arc::new(audio::decode_file(path).map_err(e)?);
     let mut inner = st.inner.lock().unwrap();
     let dir = inner.dir.clone().ok_or("no project")?;
@@ -879,10 +1105,15 @@ fn add_capture(st: &App, path: &Path, name: &str) -> R<ProjectView> {
     let mut p = inner.project.clone();
     let sid = ops::add_source(&mut p, &rel, SourceKind::Capture, true, name, &a);
     ops::auto_new_source(&mut p, sid, &a);
-    if p.sources.len() == 1 {
+    if p.sources.len() == 1 && p.split.mode == project::SplitMode::Absolute {
         p.split.threshold_db = auto::auto_split_threshold(&a);
     }
-    ops::split_source(&mut p, sid, &a);
+    // one track per side: nothing splits until a split button is pressed
+    ops::whole_source_track(&mut p, sid, &a);
+    tone_on_arrival(&mut p, sid, &a);
+    if emphasis {
+        p.chain.deemphasis.enabled = true;
+    }
     inner.audio.insert(sid, a);
     st.commit(&mut inner, p, "Capture");
     let _ = inner.project.save(&dir);
@@ -900,7 +1131,7 @@ pub fn recover_capture(st: State<'_, App>, path: String, name: Option<String>) -
     let p = PathBuf::from(&path);
     audio::repair_wav_header(&p).map_err(e)?;
     *st.recovery.lock().unwrap() = None;
-    add_capture(&st, &p, name.as_deref().unwrap_or("Recovered side"))
+    add_capture(&st, &p, name.as_deref().unwrap_or("Recovered side"), false)
 }
 
 #[derive(Serialize)]
@@ -965,9 +1196,13 @@ pub fn batch_plan(root: String) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn batch_run(app: AppHandle, st: State<'_, App>, folders: Vec<String>, preset: Option<String>, opts: batch::BatchOptions) -> R<()> {
+pub fn batch_run(app: AppHandle, st: State<'_, App>, folders: Vec<String>, preset: Option<String>, opts: batch::BatchOptions, medium: Option<String>) -> R<()> {
     let pr = match preset.as_deref().filter(|s| !s.is_empty()) {
         Some(id) => Some(presets::find(id).ok_or("no such preset")?),
+        None => None,
+    };
+    let med = match medium.as_deref().filter(|s| !s.is_empty() && *s != "vinyl-lp") {
+        Some(id) => Some(media::find(id).ok_or("no such medium")?),
         None => None,
     };
     st.begin_job("batch")?;
@@ -983,7 +1218,15 @@ pub fn batch_run(app: AppHandle, st: State<'_, App>, folders: Vec<String>, prese
             let name = Path::new(f).file_name().unwrap_or_default().to_string_lossy().to_string();
             let a2 = app.clone();
             let base = i as f32 / n as f32;
-            let r = batch::process_folder(Path::new(f), &opts, pr.as_ref(), &move |fr, m| progress(&a2, "batch", base + fr / n as f32, &format!("{name}: {m}")), &st.cancel);
+            let prog = move |fr: f32, m: String| progress(&a2, "batch", base + fr / n as f32, &format!("{name}: {m}"));
+            let r = (|| {
+                let mut start = Project::default();
+                if let Some(m) = &med {
+                    media::apply_to_project(&mut start, m, None, None);
+                }
+                let (mut p, sources) = batch::folder_project_in(start, Path::new(f), &opts, pr.as_ref(), &|m| prog(0.0, m))?;
+                export::export(&mut p, Path::new("/"), &sources, &prog, &st.cancel)
+            })();
             match r {
                 Ok(res) => done.push(res.album_dir.to_string_lossy().to_string()),
                 Err(err) => failed.push(format!("{f}: {err}")),
@@ -1004,7 +1247,8 @@ pub fn tile_wave(st: State<'_, App>, t0: f64, t1: f64, w: u32, h: u32, vzoom: f3
         .iter()
         .filter_map(|l| inner.audio.get(&l.source_id).map(|a| tiles::Seg { place: l, src: a, processed: inner.peaks.get(&l.source_id).map(|v| v.as_slice()) }))
         .collect();
-    tauri::ipc::Response::new(tiles::waveform(&segs, t0, t1.max(t0 + 1e-3), w, h, vzoom.clamp(0.5, 64.0)))
+    let pal = st.palette.lock().unwrap().clone();
+    tauri::ipc::Response::new(tiles::waveform_with(&segs, t0, t1.max(t0 + 1e-3), w, h, vzoom.clamp(0.5, 64.0), &pal))
 }
 
 #[tauri::command]
@@ -1012,5 +1256,299 @@ pub fn tile_spec(st: State<'_, App>, t0: f64, t1: f64, w: u32, h: u32) -> tauri:
     let inner = st.inner.lock().unwrap();
     let layout = inner.project.layout();
     let segs: Vec<tiles::Seg> = layout.iter().filter_map(|l| inner.audio.get(&l.source_id).map(|a| tiles::Seg { place: l, src: a, processed: None })).collect();
-    tauri::ipc::Response::new(tiles::spectrogram(&segs, t0, t1.max(t0 + 1e-3), w, h, -100.0))
+    let pal = st.palette.lock().unwrap().clone();
+    tauri::ipc::Response::new(tiles::spectrogram_with(&segs, t0, t1.max(t0 + 1e-3), w, h, -100.0, &pal))
+}
+
+/// A strip under the waveform: speed, azimuth, dropouts or errors.
+#[tauri::command]
+pub fn tile_overlay(st: State<'_, App>, t0: f64, t1: f64, w: u32, h: u32, kind: tiles::Overlay) -> tauri::ipc::Response {
+    let inner = st.inner.lock().unwrap();
+    let layout = inner.project.layout();
+    let segs: Vec<tiles::OverlaySeg> = layout.iter().filter_map(|l| inner.project.source(l.source_id).map(|s| tiles::OverlaySeg { place: l, analysis: &s.fx.analysis })).collect();
+    let pal = st.palette.lock().unwrap().clone();
+    tauri::ipc::Response::new(tiles::overlay(&segs, kind, t0, t1.max(t0 + 1e-3), w, h, &pal))
+}
+
+// ---------------------------------------------------------------- media
+
+#[derive(Serialize)]
+pub struct MediaInfo {
+    media: Vec<MediumPreset>,
+    families: Vec<(Family, String)>,
+    decks: Vec<DeckProfile>,
+    curves: Vec<runout_engine::dsp::tape_eq::NamedCurve>,
+    stages: Vec<String>,
+}
+
+fn media_info() -> MediaInfo {
+    MediaInfo {
+        media: media::list(),
+        families: Family::all().iter().map(|f| (*f, f.label().to_string())).collect(),
+        decks: media::decks(),
+        curves: runout_engine::dsp::tape_eq::all_curves(),
+        stages: media::STAGES.iter().map(|s| s.to_string()).collect(),
+    }
+}
+
+/// Every medium preset (built-in and saved), the families, decks and EQ curves.
+#[tauri::command]
+pub fn media_info_get() -> MediaInfo {
+    media_info()
+}
+
+/// Switch the project to a medium, with an optional condition preset and deck.
+/// Captures, tracks and manual repairs stay.
+#[tauri::command]
+pub fn medium_set(st: State<'_, App>, id: String, condition: Option<String>, deck: Option<String>) -> R<ProjectView> {
+    let m = media::find(&id).ok_or_else(|| format!("no medium called {id}"))?;
+    let cond = match condition.as_deref().filter(|c| !c.is_empty()) {
+        Some(c) => Some(presets::find(c).ok_or_else(|| format!("no condition preset called {c}"))?),
+        None => None,
+    };
+    let dk = match deck.as_deref().filter(|d| !d.is_empty()) {
+        Some(d) => Some(media::find_deck(d).ok_or_else(|| format!("no deck called {d}"))?),
+        None => None,
+    };
+    let v = edit(&st, "Medium", |p, _| {
+        media::apply_to_project(p, &m, cond.as_ref(), dk.as_ref());
+        Ok(())
+    })?;
+    let mut pr = st.prefs.lock().unwrap();
+    pr.last_medium = Some(m.id.clone());
+    let fam = format!("{:?}", m.family).to_lowercase();
+    match &dk {
+        Some(d) => {
+            pr.deck_by_family.insert(fam, d.id.clone());
+        }
+        None => {
+            pr.deck_by_family.remove(&fam);
+        }
+    }
+    pr.save();
+    Ok(v)
+}
+
+/// Save the project's current medium settings as a user medium preset.
+/// Only the differences from the built-in it rests on are stored.
+#[tauri::command]
+pub fn medium_save(st: State<'_, App>, name: String) -> R<MediaInfo> {
+    let m = {
+        let inner = st.inner.lock().unwrap();
+        let p = &inner.project;
+        let mut m = p.medium.preset.clone();
+        m.chain = p.chain.clone();
+        m.split = p.split.clone();
+        m.export.kind = p.export.kind;
+        m.export.rate = p.export.rate;
+        m.export.bits = p.export.bit_depth;
+        m.export.dither = p.export.dither;
+        m
+    };
+    media::save(&name, &m).map_err(e)?;
+    Ok(media_info())
+}
+
+#[tauri::command]
+pub fn medium_delete(id: String) -> R<MediaInfo> {
+    let m = media::find(&id).ok_or("no such medium")?;
+    if m.builtin {
+        return Err("built-in media cannot be deleted".into());
+    }
+    media::delete(&id).map_err(e)?;
+    Ok(media_info())
+}
+
+/// Change which stage cards the Clean panel shows for this project.
+#[tauri::command]
+pub fn medium_visible(st: State<'_, App>, visible: Vec<String>) -> R<ProjectView> {
+    edit(&st, "Stages shown", |p, _| {
+        p.medium.preset.visible = media::STAGES.iter().filter(|s| visible.iter().any(|v| v == *s)).map(|s| s.to_string()).collect();
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub fn deck_save(deck: DeckProfile) -> R<MediaInfo> {
+    media::save_deck(&deck).map_err(e)?;
+    Ok(media_info())
+}
+
+#[tauri::command]
+pub fn deck_delete(id: String) -> R<MediaInfo> {
+    media::delete_deck(&id).map_err(e)?;
+    Ok(media_info())
+}
+
+/// A deck profile filled in from the open project: the speed error from the
+/// reference tone (or the hum), the azimuth from the azimuth curve and the
+/// balance from the tone's channel levels. Play a test tape and capture it,
+/// run Analyze, then press Measure.
+#[tauri::command]
+pub fn deck_measure(st: State<'_, App>) -> R<DeckProfile> {
+    let inner = st.inner.lock().unwrap();
+    let p = &inner.project;
+    let s = p.sources.iter().find(|s| s.raw).or_else(|| p.sources.first()).ok_or("capture a test tape first")?;
+    let a = inner.audio.get(&s.id).ok_or("audio not loaded")?.clone();
+    let fam = p.medium.preset.family;
+    let wow = p.chain.wow.clone();
+    let an = s.fx.analysis.clone();
+    drop(inner);
+    let tone = an.tone.clone().or_else(|| auto::detect_tone(&a));
+    let speed = tone.as_ref().and_then(|t| t.speed_err_pct).or_else(|| auto::measure_wow(&a, &wow).static_err_pct);
+    let az = an.azimuth().map(|c| c.mean()).or_else(|| auto::measure_azimuth(&a).map(|c| c.mean()));
+    let mut bal = 0.0f32;
+    if a.channels == 2 {
+        let (from, to) = match &tone {
+            Some(t) => ((t.start_s * a.rate as f64) as i64, ((t.start_s + t.len_s) * a.rate as f64) as i64),
+            None => (0, (a.frames as i64).min(a.rate as i64 * 30)),
+        };
+        let rms = |c: usize| {
+            let x = a.read_channel(c, from, to);
+            let s: f64 = x.iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / x.len().max(1) as f64;
+            10.0 * s.max(1e-20).log10()
+        };
+        // positive moves the image right: right is quieter, so boost it
+        bal = ((rms(0) - rms(1)) as f32 * 10.0).round() / 10.0;
+        if bal.abs() > 6.0 {
+            bal = 0.0;
+        }
+    }
+    if speed.is_none() && az.is_none() {
+        return Err("nothing to measure: capture a test tape (a steady tone at the head), then Analyze".into());
+    }
+    Ok(DeckProfile {
+        id: String::new(),
+        name: String::new(),
+        family: fam,
+        speed_pct: speed.map(|v| (v * 100.0).round() / 100.0).unwrap_or(0.0),
+        azimuth_us: az.map(|v| (v * 10.0).round() / 10.0).unwrap_or(0.0),
+        balance_db: bal,
+        eq_low_db: 0.0,
+        eq_high_db: 0.0,
+    })
+}
+
+// ---------------------------------------------------------------- settings
+
+#[tauri::command]
+pub fn settings_get(st: State<'_, App>) -> Settings {
+    settings_of(&st)
+}
+
+#[tauri::command]
+pub fn settings_set(st: State<'_, App>, settings: Settings) -> Settings {
+    {
+        let mut p = st.prefs.lock().unwrap();
+        p.theme = settings.theme.clone();
+        p.last_medium = Some(settings.last_medium.clone());
+        p.deck_by_family = settings.deck_by_family.clone();
+        let root = settings.library_root.trim();
+        p.library_root = if root.is_empty() || root == project::DEFAULT_ROOT { None } else { Some(root.to_string()) };
+        p.save();
+    }
+    *st.palette.lock().unwrap() = tiles::Palette::named(&settings.theme);
+    settings_of(&st)
+}
+
+/// Switch the theme: the window restyles from CSS, the pictures drawn in
+/// Rust take the new palette from here.
+#[tauri::command]
+pub fn set_theme(st: State<'_, App>, theme: String) -> Settings {
+    {
+        let mut p = st.prefs.lock().unwrap();
+        p.theme = theme.clone();
+        p.save();
+    }
+    *st.palette.lock().unwrap() = tiles::Palette::named(&theme);
+    settings_of(&st)
+}
+
+// ---------------------------------------------------------------- tape tools
+
+/// Find 8-track program changes on every side (or one). The UI shows the
+/// ones that cut a song and asks before joining.
+#[tauri::command]
+pub fn find_program_changes(st: State<'_, App>, source_id: Option<u64>) -> R<ProjectView> {
+    let mut inner = st.inner.lock().unwrap();
+    let ids: Vec<u64> = inner.project.sources.iter().filter(|s| s.kind != SourceKind::Folder).map(|s| s.id).filter(|id| source_id.map(|x| x == *id).unwrap_or(true)).collect();
+    for id in ids {
+        if let Some(a) = inner.audio.get(&id).cloned() {
+            let v = auto::find_program_changes(&a);
+            inner.program_changes.insert(id, v);
+        }
+    }
+    Ok(st.view(&inner))
+}
+
+/// Split every side at its program changes.
+#[tauri::command]
+pub fn split_program_changes(st: State<'_, App>) -> R<ProjectView> {
+    edit(&st, "Split at program changes", |p, inner| {
+        let ids: Vec<u64> = p.sources.iter().filter(|s| s.kind != SourceKind::Folder).map(|s| s.id).collect();
+        for id in ids {
+            let Some(a) = inner.audio.get(&id) else { continue };
+            let cuts: Vec<(f64, f64)> = match inner.program_changes.get(&id) {
+                Some(v) if !v.is_empty() => {
+                    let mut out = Vec::new();
+                    let mut t = 0.0;
+                    for c in v {
+                        let m = (c.start_s + c.end_s) / 2.0;
+                        out.push((t, m));
+                        t = m;
+                    }
+                    out.push((t, a.duration()));
+                    out
+                }
+                _ => auto::split_program_changes(a),
+            };
+            p.tracks.retain(|t| t.source_id != id);
+            for (s, e) in cuts {
+                ops::new_track(p, id, s, e);
+            }
+        }
+        ops::renumber(p);
+        Ok(())
+    })
+}
+
+/// Join the two tracks either side of a program change: the song plays
+/// through and the mute is cut out with a crossfade.
+#[tauri::command]
+pub fn join_program_change(st: State<'_, App>, source_id: u64, start_s: f64, end_s: f64, xfade_ms: Option<f32>) -> R<ProjectView> {
+    edit(&st, "Join across program change", |p, _| {
+        let mid = (start_s + end_s) / 2.0;
+        let first = p.tracks.iter().filter(|t| t.source_id == source_id && t.end_s <= mid + 0.05 && t.end_s >= start_s - 0.5).map(|t| t.id).next().ok_or("no track ends at that program change: split at program changes first")?;
+        let second = p.tracks.iter().filter(|t| t.source_id == source_id && t.start_s >= mid - 0.05 && t.start_s <= end_s + 0.5).map(|t| t.id).next().ok_or("no track starts after that program change")?;
+        if ops::join_across(p, first, second, (start_s, end_s), xfade_ms.unwrap_or(20.0).clamp(1.0, 200.0)) {
+            Ok(())
+        } else {
+            Err("those tracks cannot be joined".into())
+        }
+    })
+}
+
+/// Set a side's speed trim from a known running time: "this song runs
+/// 3:41" with a track selected, or "this side runs 23:41" without one.
+#[tauri::command]
+pub fn speed_from_length(st: State<'_, App>, source_id: u64, track_id: Option<u64>, want_s: f64) -> R<ProjectView> {
+    edit(&st, "Speed from length", |p, inner| {
+        let a = inner.audio.get(&source_id).ok_or("audio not loaded")?;
+        // source seconds the length covers
+        let span = match track_id.and_then(|id| p.track(id)).filter(|t| t.source_id == source_id) {
+            Some(t) => {
+                let cut: f64 = t.joins.iter().map(|j| j.end_s - j.start_s).sum();
+                (t.end_s - t.start_s - cut).max(0.0)
+            }
+            None => a.duration(),
+        };
+        let s = p.source_mut(source_id).ok_or("no side")?;
+        let have = span / s.fx.speed.ratio();
+        let trim = s.fx.speed.solve_trim_for_length(have, want_s);
+        if !(-20.0..=20.0).contains(&trim) {
+            return Err(format!("that would need a {trim:.1}% speed change: check the length"));
+        }
+        s.fx.speed.trim_pct = (trim * 1000.0).round() / 1000.0;
+        Ok(())
+    })
 }
