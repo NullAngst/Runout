@@ -84,13 +84,18 @@ pub fn app_info(st: State<'_, App>) -> AppInfo {
         Recovery { project: s.open_project.clone(), autosave_newer, capture: s.capture.clone().filter(|c| Path::new(c).exists()), capture_name: s.capture_name.clone() }
     });
     let home = std::env::var("HOME").unwrap_or_default();
+    // Each lock is taken and dropped in its own statement: a guard inside the
+    // struct literal would live to the end of it, and settings_of takes the
+    // same lock again, which deadlocks the main thread.
+    let recent = st.prefs.lock().unwrap().recent.clone();
+    let settings = settings_of(&st);
     AppInfo {
         version: env!("CARGO_PKG_VERSION").into(),
         projects_root: projects_root().to_string_lossy().to_string(),
         recovery: rec,
-        recent: st.prefs.lock().unwrap().recent.clone(),
+        recent,
         music_root: format!("{home}/Music"),
-        settings: settings_of(&st),
+        settings,
     }
 }
 
